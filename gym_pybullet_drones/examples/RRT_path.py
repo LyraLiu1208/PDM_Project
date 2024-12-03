@@ -139,6 +139,13 @@ def run(
         #### Make it rain rubber ducks #############################
         # if i/env.SIM_FREQ>5 and i%10==0 and i/env.SIM_FREQ<10: p.loadURDF("duck_vhacd.urdf", [0+random.gauss(0, 0.3),-0.5+random.gauss(0, 0.3),3], p.getQuaternionFromEuler([random.randint(0,360),random.randint(0,360),random.randint(0,360)]), physicsClientId=PYB_CLIENT)
 
+##################################### THIS CODE WAS ADDED (BELOW) #############################################################
+        if obstacles and i % (env.PYB_FREQ * 10) == 0:  # Add obstacles every 2 seconds
+            pos = [random.uniform(-0.1, 0.1), random.uniform(-0.1, 0.1), random.uniform(0, 1)]  # Random position
+            size = random.uniform(0.1, 0.3)  # Random size
+            env.addObstacle(position=pos, size=size)
+##################################### THIS CODE WAS ADDED (ABOVE #############################################################
+
 
         #### Step the simulation ###################################
         obs, reward, terminated, truncated, info = env.step(action)
