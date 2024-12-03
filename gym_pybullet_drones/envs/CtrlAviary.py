@@ -1,5 +1,6 @@
 import numpy as np
 from gymnasium import spaces
+import pybullet as p
 
 from gym_pybullet_drones.envs.BaseAviary import BaseAviary
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
@@ -70,6 +71,35 @@ class CtrlAviary(BaseAviary):
                          )
 
     ################################################################################
+
+
+######################## THIS CODE WAS ADDED (BELOW) ###############################################
+    def addObstacle(self, position, size, shape_type=p.GEOM_BOX):
+        """Adds an obstacle to the PyBullet simulation.
+        
+        Parameters
+        ----------
+        position : list[float]
+            The (x, y, z) position of the obstacle.
+        size : float or list[float]
+            The size of the obstacle (single value for spheres, [x, y, z] for boxes).
+        shape_type : int, optional
+            The PyBullet shape type (default is box).
+        """
+        if shape_type == p.GEOM_BOX:
+            half_extents = [size, size, size] if isinstance(size, float) else size
+            collision_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents)
+        elif shape_type == p.GEOM_SPHERE:
+            collision_shape = p.createCollisionShape(p.GEOM_SPHERE, radius=size)
+        else:
+            raise ValueError("Unsupported shape type")
+        
+        body = p.createMultiBody(
+            baseCollisionShapeIndex=collision_shape,
+            basePosition=position
+        )
+        return body
+######################## THIS CODE WAS ADDED (ABOVE) ###############################################
 
     def _actionSpace(self):
         """Returns the action space of the environment.
