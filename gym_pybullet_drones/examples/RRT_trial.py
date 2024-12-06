@@ -11,7 +11,7 @@ from gym_pybullet_drones.utils.Logger import Logger
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
-DEFAULT_GUI = False
+DEFAULT_GUI = True
 DEFAULT_SIMULATION_FREQ_HZ = 240
 DEFAULT_CONTROL_FREQ_HZ = 48
 DEFAULT_DURATION_SEC = 20
@@ -106,6 +106,10 @@ class RRT:
         """Construct the path from goal to start."""
         path = [self.goal]
         while True:
+            for i, item in enumerate(self.tree):
+                if np.array_equal(item, path[-1]):
+                    del self.tree[i]
+                    break
             nearest = self.nearest_neighbor(path[-1])
             if np.linalg.norm(nearest - self.start) < 1e-2:
                 path.append(self.start)
