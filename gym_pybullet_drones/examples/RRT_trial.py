@@ -131,7 +131,7 @@ class TrajectoryPlanningEnv(CtrlAviary):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.obstacles = []
-        # self._add_obstacles()
+        self._add_obstacles()
 
     def _add_obstacles(self):
         """Add static obstacles to the environment."""
@@ -172,7 +172,7 @@ def run_simulation(debug=False):
     obstacles = env.get_obstacles()
 
     # Plan path using RRT
-    rrt = RRT(start, goal, obstacles, bounds, step_size=0.2, max_iter=1000, debug=debug)
+    rrt = RRT(start, goal, obstacles, bounds, step_size=0.3, max_iter=5000, debug=debug)
     path = rrt.plan()
 
     if not path:
@@ -185,7 +185,7 @@ def run_simulation(debug=False):
     ctrl = [DSLPIDControl(drone_model=DEFAULT_DRONES) for _ in range(DEFAULT_NUM_DRONES)]
 
     # Reset environment and start simulation
-    obs = env.reset()
+    # obs = env.reset()
     action = np.zeros((DEFAULT_NUM_DRONES, 4))
     obs, reward, terminated, truncated, info = env.step(action)
 

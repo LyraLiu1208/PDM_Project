@@ -202,11 +202,21 @@ def run(
         debug = debug
         ):
     #### Initialize the simulation #############################
+    # Define start, goal, and bounds
+    start = np.array([-2, -2, 0.5])
+    goal = np.array([2, 2, 0.5])
+    bounds = np.array([
+        [-3, 3],  # X-axis bounds
+        [-3, 3],  # Y-axis bounds
+        [0, 1],   # Z-axis bounds
+    ])
+
     H = .1
     H_STEP = .05
     R = .3
-    INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
-    INIT_RPYS = np.array([[0, 0,  i * (np.pi/2)/num_drones] for i in range(num_drones)])
+    # INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
+    INIT_XYZS = np.array([[-2, -2, 0.5]])
+    INIT_RPYS = np.array([[0, 0,  0] for i in range(num_drones)])
 
 
     #### Create the environment ################################
@@ -226,6 +236,8 @@ def run(
 
     env = TrajectoryPlanningEnv(drone_model=DEFAULT_DRONES,
                                  num_drones=DEFAULT_NUM_DRONES,
+                                 initial_xyzs=INIT_XYZS,
+                                 initial_rpys=INIT_RPYS,
                                  physics=DEFAULT_PHYSICS,
                                  neighbourhood_radius=10,
                                  pyb_freq=DEFAULT_SIMULATION_FREQ_HZ,
@@ -239,15 +251,6 @@ def run(
     PYB_CLIENT = env.getPyBulletClient()
 
     #### Begin RRT(*) algorithm here ####
-
-    # Define start, goal, and bounds
-    start = np.array([-1, -1, 0.5])
-    goal = np.array([1, 1, 0.5])
-    bounds = np.array([
-        [-2, 2],  # X-axis bounds
-        [-2, 2],  # Y-axis bounds
-        [0, 1],   # Z-axis bounds
-    ])
 
     # Get obstacles from the environment
     obstacles = env.get_obstacles()
@@ -264,11 +267,11 @@ def run(
     
     #time.sleep(20)
     #### Initialize the logger #################################
-    logger = Logger(logging_freq_hz=control_freq_hz,
-                    num_drones=num_drones,
-                    output_folder=output_folder,
-                    colab=colab
-                    )
+    # logger = Logger(logging_freq_hz=control_freq_hz,
+    #                 num_drones=num_drones,
+    #                 output_folder=output_folder,
+    #                 colab=colab
+    #                 )
 
     #### Initialize the controllers ############################
     # if drone in [DroneModel.CF2X, DroneModel.CF2P]:
@@ -285,7 +288,7 @@ def run(
             p.addUserDebugText("Target", target, textColorRGB=[0, 1, 0], textSize=1.2)
 
         # Move towards each target waypoint
-        for _ in range(int(DEFAULT_CONTROL_FREQ_HZ * 0.5)):  # Adjust loop for smooth movement
+        for _ in range(int(DEFAULT_CONTROL_FREQ_HZ * 1)):  # Adjust loop for smooth movement
             for i in range(DEFAULT_NUM_DRONES):
                 # Compute control action for the drone
                 action[i, :], _, _ = ctrl[i].computeControlFromState(
