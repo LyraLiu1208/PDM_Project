@@ -1,12 +1,19 @@
 import os
 import time
 import argparse
+from datetime import datetime
+import pdb
+import math
+import random
 import numpy as np
 import pybullet as p
+import matplotlib.pyplot as plt
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.envs.CtrlAviary import CtrlAviary
+from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.Logger import Logger
+from gym_pybullet_drones.utils.utils import sync, str2bool
 
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
@@ -141,6 +148,7 @@ class TrajectoryPlanningEnv(CtrlAviary):
 
 def run_simulation(debug=False):
     """Run the drone simulation with RRT trajectory planning."""
+    # Create the simulation environment
     env = TrajectoryPlanningEnv(drone_model=DEFAULT_DRONES,
                                  num_drones=DEFAULT_NUM_DRONES,
                                  physics=DEFAULT_PHYSICS,
@@ -155,20 +163,16 @@ def run_simulation(debug=False):
     start = np.array([-1, -1, 0.5])
     goal = np.array([1, 1, 0.5])
     bounds = np.array([
-        [-2, 2],  # X-axis: slightly beyond start (0) and goal (2)
-        [-2, 2],  # Y-axis: slightly beyond start (0) and goal (2)
-        [0, 1],   # Z-axis: slightly above and below the Z coordinate of start and goal (0.5)
+        [-2, 2],  # X-axis bounds
+        [-2, 2],  # Y-axis bounds
+        [0, 1],   # Z-axis bounds
     ])
 
-    if debug:
-        print(f"Start: {start}, Goal: {goal}, Bounds: {bounds}")
-        p.addUserDebugText("Start", start, textColorRGB=[0, 1, 0], textSize=1.5)  # Green for start
-        p.addUserDebugText("Goal", goal, textColorRGB=[1, 0, 0], textSize=1.5)    # Red for goal
-        p.addUserDebugLine([bounds[0][0], bounds[1][0], bounds[2][0]], [bounds[0][1], bounds[1][1], bounds[2][1]], [0, 0, 1])
+    # Get obstacles from the environment
+    obstacles = env.get_obstacles()
 
     # Plan path using RRT
-    obstacles = env.get_obstacles()
-    rrt = RRT(start, goal, obstacles, bounds, step_size=0.1, max_iter=2000, debug=debug)
+    rrt = RRT(start, goal, obstacles, bounds, step_size=0.2, max_iter=1000, debug=debug)
     path = rrt.plan()
 
     if not path:
@@ -177,22 +181,40 @@ def run_simulation(debug=False):
 
     print("RRT path found:", path)
 
-    # Execute the path
+    # Initialize PID controllers
+    ctrl = [DSLPIDControl(drone_model=DEFAULT_DRONES) for _ in range(DEFAULT_NUM_DRONES)]
+
+    # Reset environment and start simulation
     obs = env.reset()
+    action = np.zeros((DEFAULT_NUM_DRONES, 4))
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    # Follow the planned RRT path
     for target in path:
-        for _ in range(int(DEFAULT_CONTROL_FREQ_HZ * 0.1)):  # Adjust this loop for smooth movement
-            action = np.zeros((DEFAULT_NUM_DRONES, 4))
+        if debug:
+            p.addUserDebugText("Target", target, textColorRGB=[0, 1, 0], textSize=1.2)
+
+        # Move towards each target waypoint
+        for _ in range(int(DEFAULT_CONTROL_FREQ_HZ * 0.5)):  # Adjust loop for smooth movement
             for i in range(DEFAULT_NUM_DRONES):
-                pos = obs[i][:3]
-                vel = target - pos
-                action[i, :3] = vel[:3]
+                # Compute control action for the drone
+                action[i, :], _, _ = ctrl[i].computeControlFromState(
+                    control_timestep=env.CTRL_TIMESTEP,
+                    state=obs[i],
+                    target_pos=target,
+                    target_rpy=np.zeros(3)  # Assuming level flight
+                )
+
+            # Step the simulation
             obs, reward, terminated, truncated, info = env.step(action)
             if debug:
                 env.render()
             if terminated or truncated:
+                print("Simulation terminated early.")
                 break
 
     env.close()
+    print("Simulation completed successfully.")
 
 
 if __name__ == "__main__":
