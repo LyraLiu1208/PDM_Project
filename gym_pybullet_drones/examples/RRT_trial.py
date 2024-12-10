@@ -15,6 +15,9 @@ from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.utils.utils import sync, str2bool
 
+from metrics import Metrics
+import time
+
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
@@ -146,7 +149,7 @@ class TrajectoryPlanningEnv(CtrlAviary):
         return self.obstacles
 
 
-def run_simulation(debug=False):
+def run_simulation(debug=False, num_trials=10):
     """Run the drone simulation with RRT trajectory planning."""
     # Create the simulation environment
     env = TrajectoryPlanningEnv(drone_model=DEFAULT_DRONES,
@@ -168,6 +171,12 @@ def run_simulation(debug=False):
         [0, 1],   # Z-axis bounds
     ])
 
+    # Initialize Metrics
+    metrics = Metrics()
+
+    # Start timer
+    start_time = time.time()
+
     # Get obstacles from the environment
     obstacles = env.get_obstacles()
 
@@ -175,11 +184,23 @@ def run_simulation(debug=False):
     rrt = RRT(start, goal, obstacles, bounds, step_size=0.3, max_iter=5000, debug=debug)
     path = rrt.plan()
 
+    # End timer
+    end_time = time.time()
+
     if not path:
         print("RRT failed to find a path!")
         return
 
     print("RRT path found:", path)
+    
+    # Compute metrics
+    path_length = metrics.compute_path_length(path)
+    print(f"Path length: {path_length:.1f} meters")
+    computation_time = metrics.compute_computation_time(start_time, end_time)
+    print(f"Computation time: {computation_time:.1f} seconds")
+    smoothness = metrics.compute_smoothness(path)
+    print(f"Smoothness: {smoothness:.1f} rad")
+    success_rate = metrics.compute_success_rate()
 
     # Initialize PID controllers
     ctrl = [DSLPIDControl(drone_model=DEFAULT_DRONES) for _ in range(DEFAULT_NUM_DRONES)]
