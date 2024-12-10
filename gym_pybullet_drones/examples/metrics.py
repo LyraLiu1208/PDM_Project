@@ -18,7 +18,7 @@ class Metrics:
         length = 0.0
         for i in range(len(path) - 1):
             length += np.linalg.norm(np.array(path[i + 1]) - np.array(path[i]))
-        self.data['path_length'] = length
+        self.data['path_length'] = float(length)
         return length
 
     def compute_computation_time(self, start_time, end_time):
@@ -87,17 +87,50 @@ class Metrics:
                 )
             )
             smoothness += angle
-        self.data['smoothness'] = smoothness
+        self.data['smoothness'] = float(smoothness)
         return smoothness
 
-    def save_to_yaml(self):
+    def save_to_yaml(self, folder="metrics", trial_results=None):
         """
-        Save the metrics data to a YAML file.
+        Save per-trial metrics and overall statistics to a YAML file.
         Args:
-            filename (str): The name of the YAML file.
+            folder (str): The folder where the YAML file will be saved.
+            trial_results (list): A list of trial-specific metrics.
         """
+        # Ensure the folder exists
+        os.makedirs(folder, exist_ok=True)
+
+        # Calculate averages
+        total_path_length = sum(trial.get("path_length", 0) for trial in trial_results)
+        total_smoothness = sum(trial.get("smoothness", 0) for trial in trial_results)
+        total_computation_time = sum(trial.get("computation_time", 0) for trial in trial_results)
+
+        avg_path_length = total_path_length / len(trial_results)
+        avg_smoothness = total_smoothness / len(trial_results)
+        avg_computation_time = total_computation_time / len(trial_results)
+
+        # Prepare data to save
+        self.data["averages"] = {
+            "avg_path_length": round(avg_path_length, 2),
+            "avg_smoothness": round(avg_smoothness, 2),
+            "avg_computation_time": round(avg_computation_time, 2)
+        }
+        self.data["trials"] = {}
+
+        for trial in trial_results:
+            trial_number = trial["trial"]
+            self.data["trials"][f"Trial {trial_number}"] = trial
+
+        self.data.pop("path_length")
+        self.data.pop("smoothness")
+        self.data.pop("computation_time")
+
+        # Generate a timestamped filename
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        filename = os.path.join("Metrices", f"metrics_{timestamp}.yaml")
-        with open(filename, 'w') as file:
+        filename = os.path.join(folder, f"metrics_{timestamp}.yaml")
+
+        # Save metrics to YAML file
+        with open(filename, "w") as file:
             yaml.dump(self.data, file, default_flow_style=False)
+
         print(f"Metrics saved to {filename}")

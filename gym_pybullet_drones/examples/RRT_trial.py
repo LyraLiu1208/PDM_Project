@@ -29,7 +29,7 @@ DEFAULT_OUTPUT_FOLDER = 'results'
 
 
 class RRT:
-    def __init__(self, start, goal, obstacles, bounds, step_size=0.1, max_iter=1000, debug=False):
+    def __init__(self, start, goal, obstacles, bounds, step_size=0.1, max_iter=1000, debug=False, num_trials=1):
         self.start = np.array(start)
         self.goal = np.array(goal)
         self.obstacles = obstacles
@@ -39,6 +39,7 @@ class RRT:
         self.tree = [self.start]
         self.path = []
         self.debug = debug
+        self.num_trials = num_trials
 
     def is_in_collision(self, point):
         """Check if a point collides with any obstacle."""
@@ -149,7 +150,7 @@ class TrajectoryPlanningEnv(CtrlAviary):
         return self.obstacles
 
 
-def run_simulation(debug=False, num_trials=10):
+def run_simulation(debug=False, num_trials=1):
     """Run the drone simulation with RRT trajectory planning."""
     # Create the simulation environment
     env = TrajectoryPlanningEnv(drone_model=DEFAULT_DRONES,
@@ -171,76 +172,101 @@ def run_simulation(debug=False, num_trials=10):
         [0, 1],   # Z-axis bounds
     ])
 
-    # Initialize Metrics
-    metrics = Metrics()
-
-    # Start timer
-    start_time = time.time()
-
     # Get obstacles from the environment
     obstacles = env.get_obstacles()
 
-    # Plan path using RRT
-    rrt = RRT(start, goal, obstacles, bounds, step_size=0.3, max_iter=5000, debug=debug)
-    path = rrt.plan()
+    # Initialize Metrics
+    metrics = Metrics()
+    trial_results = []  # List to store results of each trial
 
-    # End timer
-    end_time = time.time()
-
-    if not path:
-        print("RRT failed to find a path!")
-        return
-
-    print("RRT path found:", path)
+    for trial in range(num_trials):
+        print(f"Trial {trial + 1}/{num_trials}")
     
-    # Compute metrics
-    path_length = metrics.compute_path_length(path)
-    print(f"Path length: {path_length:.1f} meters")
-    computation_time = metrics.compute_computation_time(start_time, end_time)
-    print(f"Computation time: {computation_time:.1f} seconds")
-    smoothness = metrics.compute_smoothness(path)
-    print(f"Smoothness: {smoothness:.1f} rad")
-    success_rate = metrics.compute_success_rate()
+        # Start timer
+        start_time = time.time()
 
-    # Initialize PID controllers
-    ctrl = [DSLPIDControl(drone_model=DEFAULT_DRONES) for _ in range(DEFAULT_NUM_DRONES)]
+        # Plan path using RRT
+        rrt = RRT(start, goal, obstacles, bounds, step_size=0.3, max_iter=5000, debug=debug)
+        path = rrt.plan()
 
-    # Reset environment and start simulation
-    # obs = env.reset()
-    action = np.zeros((DEFAULT_NUM_DRONES, 4))
-    obs, reward, terminated, truncated, info = env.step(action)
+        # End timer
+        end_time = time.time()
 
-    # Follow the planned RRT path
-    for target in path:
-        if debug:
-            p.addUserDebugText("Target", target, textColorRGB=[0, 1, 0], textSize=1.2)
+        # Initialize trial result
+        trial_result = {"trial": trial + 1, "path_found": False, "collided": False}
+        
+        if len(path) > 0:
+            trial_result["path_found"] = True
+            print(f"Path found in trial {trial + 1}.")
 
-        # Move towards each target waypoint
-        for _ in range(int(DEFAULT_CONTROL_FREQ_HZ * 0.5)):  # Adjust loop for smooth movement
-            for i in range(DEFAULT_NUM_DRONES):
-                # Compute control action for the drone
-                action[i, :], _, _ = ctrl[i].computeControlFromState(
-                    control_timestep=env.CTRL_TIMESTEP,
-                    state=obs[i],
-                    target_pos=target,
-                    target_rpy=np.zeros(3)  # Assuming level flight
-                )
+            # Compute metrics for this trial
+            trial_result["path_length"] = float(metrics.compute_path_length(path))
+            trial_result["computation_time"] = float(metrics.compute_computation_time(start_time, end_time))
+            trial_result["smoothness"] = float(metrics.compute_smoothness(path))
 
-            # Step the simulation
+            # Initialize PID controllers
+            ctrl = [DSLPIDControl(drone_model=DEFAULT_DRONES) for _ in range(DEFAULT_NUM_DRONES)]
+
+            # Reset environment and start simulation
+            # obs = env.reset()
+            action = np.zeros((DEFAULT_NUM_DRONES, 4))
             obs, reward, terminated, truncated, info = env.step(action)
-            if debug:
-                env.render()
-            if terminated or truncated:
-                print("Simulation terminated early.")
-                break
 
-    env.close()
+            # Follow the planned RRT path
+            for target in path:
+                if debug:
+                    p.addUserDebugText("Target", target, textColorRGB=[0, 1, 0], textSize=1.2)
+
+            # Move towards each target waypoint
+            for _ in range(int(DEFAULT_CONTROL_FREQ_HZ * 0.5)):  # Adjust loop for smooth movement
+                for i in range(DEFAULT_NUM_DRONES):
+                    # Compute control action for the drone
+                    action[i, :], _, _ = ctrl[i].computeControlFromState(
+                        control_timestep=env.CTRL_TIMESTEP,
+                        state=obs[i],
+                        target_pos=target,
+                        target_rpy=np.zeros(3)  # Assuming level flight
+                    )
+
+                # Step the simulation
+                obs, reward, terminated, truncated, info = env.step(action)
+                if debug:
+                    env.render()
+                if terminated or truncated:
+                    print("Simulation terminated early.")
+                    break
+    
+        else:
+            print(f"Path not found in trial {trial + 1}.")
+        
+        # Add trial result to the list
+        trial_results.append(trial_result)
+    
+    # Compute success rate and collision-free rate after all trials
+    success_rate = metrics.compute_success_rate(trial_results)
+    collision_free_rate = metrics.compute_collision_free_rate(trial_results)
+
+    # Store overall metrics
+    metrics.data["success_rate"] = success_rate
+    metrics.data["collision_free_rate"] = collision_free_rate
+
+    # Save metrics to YAML
+    metrics.save_to_yaml(trial_results=trial_results)
+
+    #if not path:
+    #    print("RRT failed to find a path!")
+    #    return
+    # print("RRT path found:", path)
+
     print("Simulation completed successfully.")
-
+    print(f"Success Rate: {success_rate:.1f}%")
+    print(f"Collision-Free Rate: {collision_free_rate:.1f}%")
+    env.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Trajectory Planning with RRT in CtrlAviary')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode for detailed output and visualization')
+    parser.add_argument('--num_trials', type=int, default=1, help='Number of trials to run the simulation')
     args = parser.parse_args()
 
-    run_simulation(debug=args.debug)
+    run_simulation(debug=args.debug, num_trials=args.num_trials)
