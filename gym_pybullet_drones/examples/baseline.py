@@ -32,6 +32,10 @@ from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.utils.utils import sync, str2bool
 
+# p.connect(p.GUI)
+# p.configureDebugVisualizer(p.COV_ENABLE_MOUSE_PICKING, 1)
+# p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1)
+
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
@@ -39,7 +43,7 @@ DEFAULT_GUI = True
 DEFAULT_RECORD_VISION = False
 DEFAULT_PLOT = True
 DEFAULT_USER_DEBUG_GUI = False
-DEFAULT_OBSTACLES = True
+DEFAULT_OBSTACLES = False
 DEFAULT_SIMULATION_FREQ_HZ = 240
 DEFAULT_CONTROL_FREQ_HZ = 48
 DEFAULT_DURATION_SEC = 12
@@ -244,7 +248,7 @@ def run(
                                  ctrl_freq=DEFAULT_CONTROL_FREQ_HZ,
                                  gui=DEFAULT_GUI,
                                  record=False,
-                                 obstacles=True
+                                 obstacles=False
                                  )
     
     #### Obtain the PyBullet Client ID from the environment ####
@@ -256,7 +260,7 @@ def run(
     obstacles = env.get_obstacles()
 
     # Plan path using RRT
-    rrt = RRT(start, goal, obstacles, bounds, step_size=0.3, max_iter=5000, debug=debug)
+    rrt = RRT(start, goal, obstacles, bounds, step_size=0.3, max_iter=5000, debug=True)
     path = rrt.plan()
 
     if not path:
@@ -281,14 +285,15 @@ def run(
     action = np.zeros((num_drones,4))
     START = time.time()
     obs, reward, terminated, truncated, info = env.step(action)
-
+    k = 0
     # Follow the planned RRT path
     for target in path:
+        k = k + 1
         if debug:
             p.addUserDebugText("Target", target, textColorRGB=[0, 1, 0], textSize=1.2)
 
         # Move towards each target waypoint
-        for _ in range(int(DEFAULT_CONTROL_FREQ_HZ * 1)):  # Adjust loop for smooth movement
+        for step in range(0, int(2*env.CTRL_FREQ)):  # Adjust loop for smooth movement
             for i in range(DEFAULT_NUM_DRONES):
                 # Compute control action for the drone
                 action[i, :], _, _ = ctrl[i].computeControlFromState(
@@ -305,7 +310,9 @@ def run(
             if terminated or truncated:
                 print("Simulation terminated early.")
                 break
-
+            
+            env.render()
+            sync(step + (k-1)*int(2*env.CTRL_FREQ), START, env.CTRL_TIMESTEP)
         #### Log the simulation ####################################
         # for j in range(num_drones):
         #     logger.log( drone=j,
@@ -315,11 +322,13 @@ def run(
         #                 )
 
         #### Printout ##############################################
-        env.render()
+            #
 
         #### Sync the simulation ###################################
-        if gui:
-            sync(i, START, env.CTRL_TIMESTEP)
+        # if gui:
+        #     sync(i, START, env.CTRL_TIMESTEP)
+
+            
 
     #### Close the environment #################################
     env.close()
