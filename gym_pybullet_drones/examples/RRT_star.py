@@ -48,12 +48,13 @@ DEFAULT_COLAB = False
 debug = False
 
 class RRT:
-    def __init__(self, start, goal, obstacles, bounds, step_size=0.1, max_iter=1000, debug=False):
+    def __init__(self, start, goal, obstacles, obstacle_ids, bounds, step_size=0.1, max_iter=1000, debug=False):
         self.start = np.array(start)
         self.goal = np.array(goal)
         self.radius = 1.5
         self.parents = {tuple(start):None}
         self.costs = {tuple(start):0}
+        self.edges = {(tuple(start), tuple(start)):None}
         self.obstacles = obstacles
         self.bounds = bounds
         self.step_size = step_size
@@ -61,11 +62,26 @@ class RRT:
         self.tree = [self.start]
         self.path = []
         self.debug = debug
+        self.obstacle_ids = obstacle_ids
 
 
 
     def is_in_collision(self, point):
         """Check if a point collides with any obstacle."""
+        # for obstacle_id in self.obstacle_ids:
+        #     threshold_distance = 0.01
+        #     contact_points = p.getClosestPoints(bodyA=obstacle_id, bodyB=-1, distance=threshold_distance)
+
+        #     # Filter for collisions near the point
+        #     collision_detected = any(
+        #         (abs(cp[5][0] - point[0]) < threshold_distance and
+        #         abs(cp[5][1] - point[1]) < threshold_distance and
+        #         abs(cp[5][2] - point[2]) < threshold_distance)
+        #         for cp in contact_points)
+        #     if collision_detected:
+        #         return True
+        # return False
+
         for obstacle in self.obstacles:
             center, size = obstacle
             if all(abs(point - center) <= size / 2):
@@ -128,24 +144,53 @@ class RRT:
     def rewire(self, new_node):
         """ Rewires path to new node if better one exists"""
         for neighbor in self.near(new_node):
-            if not np.array_equal(neighbor, self.goal):
-                if not self.edge_in_collision(neighbor, new_node):
-                    new_cost = self.cost(new_node) + np.linalg.norm(new_node - neighbor)
-                    if new_cost < self.cost(neighbor):
-                        self.parents[tuple(neighbor)] = new_node
-                        self.costs[tuple(neighbor)] = new_cost
+            if not self.edge_in_collision(neighbor, new_node):
+                new_cost = self.cost(new_node) + np.linalg.norm(new_node - neighbor)
+                if new_cost < self.cost(neighbor):
+                    self.alter_parent(neighbor, new_node)
+                    #self.parents[tuple(neighbor)] = new_node
+                    self.costs[tuple(neighbor)] = new_cost
+                
+    
+    def lowest_cost_neighbor(self, new_node):
+        best_neighbor = []
+        for i in range(len(self.tree)):
+            neighbor = self.tree[i]
+            if not self.edge_in_collision(neighbor, new_node):
+                new_cost = self.cost(neighbor) + np.linalg.norm(new_node - neighbor)
+                if new_cost < self.cost(new_node):
+                    self.costs[tuple(new_node)] = new_cost
+                    best_neighbor = neighbor
+            
+        if self.cost(new_node) == float('inf'):
+            return self.nearest_neighbor(new_node)
+        else:
+            return best_neighbor
+
 
     def edge_in_collision(self, from_node, to_node):
         direction = to_node - from_node
         distance = np.linalg.norm(direction)
         samples = []
-        for i in range(1,29):
-            samples.append(from_node + 1/30*(i)*direction)
+        nr = 50
+        for i in range(1,nr-1):
+            samples.append(from_node + 1/nr*(i)*direction)
         for sample in samples:
             if self.is_in_collision(sample):
                 return True
         return False
 
+
+    def alter_parent(self, node, new_parent):
+        if self.parents.get(tuple(node)) is None:
+            self.parents[tuple(node)] = new_parent
+            self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
+        else:
+            p.removeUserDebugItem(self.edges[(tuple(node),tuple(self.parents[tuple(node)]))])
+            self.parents[tuple(node)] = new_parent
+            self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
+
+            
 
     def plan(self):
         """Plan a path using RRT."""
@@ -154,45 +199,62 @@ class RRT:
         self.costs[tuple(self.goal)] = float('inf')
         i = 0
         b = 0
-        while i < 3000 or not best_path:
+        goal_reached = False
+        while i < 1500 or not best_path:
             i = i + 1
             print(i)
             
-            # if i%500 == 0 or i == 100:
+            # if i%100 == 0:
             #     p.removeAllUserDebugItems()
             #     for debugnode in self.tree:
             #         if np.any(self.parents[tuple(debugnode)] != None):
             #             p.addUserDebugLine(self.start, self.start + [0, 0, 0.05], [1, 0, 1], 10)
             #             p.addUserDebugLine(self.goal, self.goal + [0, 0, 0.05], [0, 1, 0], 10)
             #             p.addUserDebugLine(debugnode, self.parents[tuple(debugnode)], [1, 0, 0], 3)
-
+            #     while True:
+            #         user_input = input("continue??? y")
+            #         if user_input.lower() == "y":
+            #             break
 
 
 
             rand_point = self.get_random_point()        #Returns randiom collision free point (collision check is done inside the function call)
-            nearest = self.nearest_neighbor(rand_point) #Return closest neighbour point for rand_point
+            best_neigbor = self.lowest_cost_neighbor(rand_point) #Return closest neighbour point for rand_point
             #new_point = self.steer(nearest, rand_point)
             new_point = rand_point
 
-            if not self.edge_in_collision(nearest, new_point):
+            
 
-                self.tree.append(new_point)
-                self.parents[tuple(new_point)] = nearest
-                self.costs[tuple(new_point)] = self.cost(nearest) + np.linalg.norm(nearest - new_point)
-                self.rewire(new_point)
+            self.tree.append(new_point)
+            #self.parents[tuple(new_point)] = best_neigbor
+            self.alter_parent(new_point, best_neigbor)
+            self.costs[tuple(new_point)] = self.cost(best_neigbor) + np.linalg.norm(best_neigbor - new_point)
+            self.rewire(new_point)
 
+            #self.costs[tuple(self.goal)] = 0
+            if goal_reached:
+                path = [self.goal]
+                while path[-1] is not None:
+                    path.append(self.parents[tuple(path[-1])])
+                path = path[::-1][2:]
+            
+                for node in path:
+                    self.costs[tuple(node)] = self.costs[tuple(self.parents[tuple(node)])] + np.linalg.norm(node - self.parents[tuple(node)])
+               
+            
+            if not self.edge_in_collision(new_point, self.goal): # and best_cost > 1000:
+                if self.cost(new_point) + np.linalg.norm(new_point - self.goal) < self.costs[tuple(self.goal)]:
+                    goal_reached = True
+                    #self.tree.append(self.goal)
+                    #self.parents[tuple(self.goal)] = new_point
+                    self.alter_parent(self.goal, new_point)
+                    self.costs[tuple(self.goal)] = self.cost(new_point) + np.linalg.norm(new_point - self.goal)
 
-
-                if not self.edge_in_collision(new_point, self.goal): # and best_cost > 1000:
-                    if self.cost(new_point) + np.linalg.norm(new_point - self.goal) < self.costs[tuple(self.goal)]:
-                        self.tree.append(self.goal)
-                        self.parents[tuple(self.goal)] = new_point
-                        self.costs[tuple(self.goal)] = self.cost(new_point) + np.linalg.norm(new_point - self.goal)
-
-                    if self.cost(self.goal) < best_cost:
-                        best_cost = self.cost(self.goal)
-                        best_path = self.construct_path(b)
-                        b = b+1
+            
+            if self.cost(self.goal) < best_cost:
+                best_cost = self.cost(self.goal)
+                best_path = self.construct_path(b)
+                b = b+1
 
             # Print progress at every 100 iterations
             if i % 100 == 0:
@@ -210,6 +272,8 @@ class RRT:
     def construct_path(self, b):
         """Construct the path from goal to start."""
         path = [self.goal]
+        if b > 6:
+            b = 6
         while path[-1] is not None:
             path.append(self.parents[tuple(path[-1])])
 
@@ -243,19 +307,27 @@ class TrajectoryPlanningEnv(CtrlAviary):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.obstacles = []
+        self.obstacle_ids = []
         self._add_obstacles()
 
     def _add_obstacles(self):
         """Add static obstacles to the environment."""
-        self.obstacles.append((np.array([1, 1, 0.5]), np.array([0.4, 0.4, 0.4])))
-        self.obstacles.append((np.array([-1, -1, 0.8]), np.array([0.2, 0.2, 0.6])))
+        self.obstacles.append((np.array([1, 1, 0.5]), np.array([0.7, 0.7, 2])))
+        self.obstacles.append((np.array([-1, -1, 0.8]), np.array([0.7, 0.7, 2])))
+        self.obstacles.append((np.array([-1, -0, 0.2]), np.array([0.7, 0.7, 2])))
+        self.obstacles.append((np.array([0, -1, 0.8]), np.array([0.7, 0.7, 2])))
+        self.obstacles.append((np.array([-1, -0, 0.2]), np.array([0.7, 0.7, 2])))
+        self.obstacles.append((np.array([0.5, -1, 0.2]), np.array([0.2, 0.2, 0.6])))
+        self.obstacles.append((np.array([-1, -0.5, 0.2]), np.array([0.2, 0.2, 0.6])))
+        self.obstacles.append((np.array([1.50, -0.5, 0]), np.array([0.2, 0.2, 0.6])))
+        self.obstacles.append((np.array([0, 0, 0]), np.array([0.4, 0.4, 0.9])))
         for center, size in self.obstacles:
             col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=size / 2)
-            p.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_shape, basePosition=center)
+            self.obstacle_ids.append(p.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_shape, basePosition=center))
 
     def get_obstacles(self):
         """Return the list of obstacles in the environment."""
-        return self.obstacles
+        return self.obstacles, self.obstacle_ids
 
 
 def run(
@@ -311,10 +383,10 @@ def run(
     #### Begin RRT(*) algorithm here ####
 
     # Get obstacles from the environment
-    obstacles = env.get_obstacles()
+    obstacles, obstacle_ids = env.get_obstacles()
 
     # Plan path using RRT
-    rrt = RRT(start, goal, obstacles, bounds, step_size=0.4, max_iter=3000, debug=True)
+    rrt = RRT(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=3000, debug=True)
     path = rrt.plan()
 
     if not path:
