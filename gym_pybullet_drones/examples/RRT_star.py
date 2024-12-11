@@ -51,7 +51,7 @@ class RRT:
     def __init__(self, start, goal, obstacles, obstacle_ids, bounds, step_size=0.1, max_iter=1000, debug=False):
         self.start = np.array(start)
         self.goal = np.array(goal)
-        self.radius = 1.5
+        self.radius = 0.7
         self.parents = {tuple(start):None}
         self.costs = {tuple(start):0}
         self.edges = {(tuple(start), tuple(start)):None}
@@ -154,8 +154,9 @@ class RRT:
     
     def lowest_cost_neighbor(self, new_node):
         best_neighbor = []
-        for i in range(len(self.tree)):
-            neighbor = self.tree[i]
+        #for i in range(len(self.tree)):
+        for neighbor in self.near(new_node):
+            #neighbor = self.tree[i]
             if not self.edge_in_collision(neighbor, new_node):
                 new_cost = self.cost(neighbor) + np.linalg.norm(new_node - neighbor)
                 if new_cost < self.cost(new_node):
@@ -321,6 +322,36 @@ class TrajectoryPlanningEnv(CtrlAviary):
         self.obstacles.append((np.array([-1, -0.5, 0.2]), np.array([0.2, 0.2, 0.6])))
         self.obstacles.append((np.array([1.50, -0.5, 0]), np.array([0.2, 0.2, 0.6])))
         self.obstacles.append((np.array([0, 0, 0]), np.array([0.4, 0.4, 0.9])))
+        self.obstacles.append((np.array([-3, -4, 0.5]), np.array([0.5, 0.5, 1])))
+        self.obstacles.append((np.array([4, -3, 0.7]), np.array([0.6, 0.6, 1.5])))
+        self.obstacles.append((np.array([-2, 3, 0.3]), np.array([0.4, 0.4, 0.8])))
+        self.obstacles.append((np.array([3, -1, 0.9]), np.array([0.3, 0.3, 0.7])))
+        self.obstacles.append((np.array([-4, 2, 0.4]), np.array([0.5, 0.5, 1.2])))
+        self.obstacles.append((np.array([2, -2, 0.6]), np.array([0.6, 0.6, 1.1])))
+        self.obstacles.append((np.array([1, 4, 0.1]), np.array([0.7, 0.7, 1.3])))
+        self.obstacles.append((np.array([-5, 0, 0.8]), np.array([0.4, 0.4, 0.9])))
+        self.obstacles.append((np.array([0, 5, 0.2]), np.array([0.3, 0.3, 0.5])))
+        self.obstacles.append((np.array([-4, -3, 0.5]), np.array([0.2, 0.2, 0.6])))
+        self.obstacles.append((np.array([-5, -5, 0.3]), np.array([0.5, 0.5, 1.0])))
+        self.obstacles.append((np.array([5, -5, 0.6]), np.array([0.6, 0.6, 1.2])))
+        self.obstacles.append((np.array([-3, 5, 0.9]), np.array([0.7, 0.7, 1.5])))
+        self.obstacles.append((np.array([5, 3, 0.4]), np.array([0.3, 0.3, 0.8])))
+        self.obstacles.append((np.array([-2, -4, 0.5]), np.array([0.4, 0.4, 1.0])))
+        self.obstacles.append((np.array([4, 4, 0.7]), np.array([0.5, 0.5, 1.1])))
+        self.obstacles.append((np.array([-5, 2, 0.2]), np.array([0.3, 0.3, 0.6])))
+        self.obstacles.append((np.array([2, -5, 0.8]), np.array([0.6, 0.6, 1.4])))
+        self.obstacles.append((np.array([3, 5, 0.3]), np.array([0.4, 0.4, 0.9])))
+        self.obstacles.append((np.array([-5, -3, 0.6]), np.array([0.5, 0.5, 1.2])))
+        self.obstacles.append((np.array([-5, -5, 0.5]), np.array([1.0, 0.2, 0.2])))
+        self.obstacles.append((np.array([5, -5, 0.5]), np.array([1.0, 0.2, 0.2])))
+        self.obstacles.append((np.array([-5, 5, 0.5]), np.array([1.0, 0.2, 0.2])))
+        self.obstacles.append((np.array([5, 5, 0.5]), np.array([1.0, 0.2, 0.2])))
+        self.obstacles.append((np.array([-3, 0, 0.4]), np.array([1.5, 0.2, 0.3])))
+        self.obstacles.append((np.array([2, -3, 0.6]), np.array([1.2, 0.2, 0.4])))
+        self.obstacles.append((np.array([-4, 2, 0.3]), np.array([1.3, 0.2, 0.3])))
+        self.obstacles.append((np.array([3, -1, 0.5]), np.array([1.4, 0.2, 0.2])))
+        self.obstacles.append((np.array([0, -4, 0.7]), np.array([2.0, 0.2, 0.3])))
+        self.obstacles.append((np.array([-5, 0, 0.2]), np.array([1.8, 0.2, 0.5])))
         for center, size in self.obstacles:
             col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=size / 2)
             self.obstacle_ids.append(p.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_shape, basePosition=center))
@@ -351,9 +382,9 @@ def run(
     start = np.array([-2, -2, 0.5])
     goal = np.array([2, 2, 0.5])
     bounds = np.array([
-        [-3, 3],  # X-axis bounds
-        [-3, 3],  # Y-axis bounds
-        [0, 1],   # Z-axis bounds
+        [-5, 5],  # X-axis bounds
+        [-5, 5],  # Y-axis bounds
+        [0.5, 0.5],   # Z-axis bounds
     ])
 
     H = .1
