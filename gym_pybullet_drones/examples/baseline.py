@@ -105,18 +105,22 @@ class RRT:
             return to_node
         return from_node + (direction / distance) * self.step_size
 
-    def smooth_path(self, path):
-        """Smooth a 3D path by removing unnecessary waypoints."""
-        smoothed_path = [path[0]]
+    def smooth_path(self, path, max_segment_length=1.0):
+        smoothed_path = [path[0]]  # Always include the start point
         i = 0
+
         while i < len(path) - 1:
             j = len(path) - 1
             while j > i + 1:
                 if not self.edge_in_collision(path[i], path[j]):
-                    break
+                    segment_length = np.linalg.norm(path[i] - path[j])
+                    if segment_length <= max_segment_length:
+                        break
                 j -= 1
             smoothed_path.append(path[j])
             i = j
+
+        smoothed_path.append(path[-1])  # Always include the goal point
         return smoothed_path
 
     def plan(self):
@@ -137,13 +141,14 @@ class RRT:
                 if np.linalg.norm(new_point - self.goal) < self.step_size:
                     self.tree.append(self.goal)
                     self.path = self.construct_path()
-
                     if self.debug:
                         # Visualize the path
                         for j in range(len(self.path) - 1):
                             p.addUserDebugLine(self.path[j], self.path[j + 1], [0, 0, 1], 2)  # Blue for path
                     # self.path = self.smooth_path(self.path)  # Improvement: Apply path smoothing
                     print(f"Path found in {i+1} iterations.")
+                    # Apply path smoothing
+                    self.path = self.smooth_path(self.path)
                     return self.path
 
             # Print progress at every 100 iterations
@@ -214,7 +219,11 @@ def run(
         [0, 1],   # Z-axis bounds
     ])
 
-    INIT_XYZS = start
+    H = .1
+    H_STEP = .05
+    R = .3
+    # INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
+    INIT_XYZS = np.array([start])
     INIT_RPYS = np.array([[0, 0,  0] for i in range(num_drones)])
 
 
