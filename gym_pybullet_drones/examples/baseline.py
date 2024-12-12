@@ -32,10 +32,6 @@ from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.utils.utils import sync, str2bool
 
-# p.connect(p.GUI)
-# p.configureDebugVisualizer(p.COV_ENABLE_MOUSE_PICKING, 1)
-# p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1)
-
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
@@ -73,18 +69,24 @@ class RRT:
                 return True
         return False
 
+    def edge_in_collision(self, from_node, to_node):
+        """Check for collisions along a 3D edge."""
+        direction = to_node - from_node
+        distance = np.linalg.norm(direction)
+        steps = int(distance / self.step_size)
+        for i in range(1, steps):
+            intermediate_point = from_node + (i / steps) * direction
+            if self.is_in_collision(intermediate_point):
+                return True
+        return False
+
     def get_random_point(self):
         """Generate a random point within bounds."""
         point = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1])
         if self.debug:
             print(f"Generated random point: {point}")
         return point
-
-    # def nearest_neighbor(self, point):
-    #     """Find the nearest neighbor in the tree to the given point."""
-    #     distances = [np.linalg.norm(point - node) for node in self.tree]
-    #     return self.tree[np.argmin(distances)]
-
+    
     def nearest_neighbor(self, point):
         """Find the nearest neighbor in the tree to the given point."""
         distances = []
@@ -103,6 +105,20 @@ class RRT:
             return to_node
         return from_node + (direction / distance) * self.step_size
 
+    def smooth_path(self, path):
+        """Smooth a 3D path by removing unnecessary waypoints."""
+        smoothed_path = [path[0]]
+        i = 0
+        while i < len(path) - 1:
+            j = len(path) - 1
+            while j > i + 1:
+                if not self.edge_in_collision(path[i], path[j]):
+                    break
+                j -= 1
+            smoothed_path.append(path[j])
+            i = j
+        return smoothed_path
+
     def plan(self):
         """Plan a path using RRT."""
         for i in range(self.max_iter):
@@ -115,7 +131,8 @@ class RRT:
                 p.addUserDebugLine(nearest, new_point, [0, 1, 0], 1)  # Green for tree edges
                 p.addUserDebugText(f"{i}", new_point, textColorRGB=[1, 1, 0], textSize=1.0)  # Yellow for points
 
-            if not self.is_in_collision(new_point):
+            # if not self.is_in_collision(new_point):
+            if not self.is_in_collision(new_point) and not self.edge_in_collision(nearest, new_point):
                 self.tree.append(new_point)
                 if np.linalg.norm(new_point - self.goal) < self.step_size:
                     self.tree.append(self.goal)
@@ -125,6 +142,7 @@ class RRT:
                         # Visualize the path
                         for j in range(len(self.path) - 1):
                             p.addUserDebugLine(self.path[j], self.path[j + 1], [0, 0, 1], 2)  # Blue for path
+                    # self.path = self.smooth_path(self.path)  # Improvement: Apply path smoothing
                     print(f"Path found in {i+1} iterations.")
                     return self.path
 
@@ -151,25 +169,6 @@ class RRT:
         if self.debug:
             print(f"Constructed path: {path}")
         return path[::-1]
-
-
-class TrajectoryPlanningEnv(CtrlAviary):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.obstacles = []
-        # self._add_obstacles()
-
-    def _add_obstacles(self):
-        """Add static obstacles to the environment."""
-        self.obstacles.append((np.array([1, 1, 0.5]), np.array([0.4, 0.4, 0.4])))
-        self.obstacles.append((np.array([-1, -1, 0.8]), np.array([0.2, 0.2, 0.6])))
-        for center, size in self.obstacles:
-            col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=size / 2)
-            p.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_shape, basePosition=center)
-
-    def get_obstacles(self):
-        """Return the list of obstacles in the environment."""
-        return self.obstacles
 
 class TrajectoryPlanningEnv(CtrlAviary):
     def __init__(self, **kwargs):
@@ -207,36 +206,19 @@ def run(
         ):
     #### Initialize the simulation #############################
     # Define start, goal, and bounds
-    start = np.array([-2, -2, 0.5])
-    goal = np.array([2, 2, 0.5])
+    start = np.array([-1.5, -1.5, 0.2])
+    goal = np.array([1.5, 1.5, 0.8])
     bounds = np.array([
-        [-3, 3],  # X-axis bounds
-        [-3, 3],  # Y-axis bounds
+        [-1.6, 1.6],  # X-axis bounds
+        [-1.6, 1.6],  # Y-axis bounds
         [0, 1],   # Z-axis bounds
     ])
 
-    H = .1
-    H_STEP = .05
-    R = .3
-    # INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
-    INIT_XYZS = np.array([[-2, -2, 0.5]])
+    INIT_XYZS = start
     INIT_RPYS = np.array([[0, 0,  0] for i in range(num_drones)])
 
 
     #### Create the environment ################################
-    # env = CtrlAviary(drone_model=drone,
-    #                     num_drones=num_drones,
-    #                     initial_xyzs=INIT_XYZS,
-    #                     initial_rpys=INIT_RPYS,
-    #                     physics=physics,
-    #                     neighbourhood_radius=10,
-    #                     pyb_freq=simulation_freq_hz,
-    #                     ctrl_freq=control_freq_hz,
-    #                     gui=gui,
-    #                     record=record_video,
-    #                     obstacles=obstacles,
-    #                     user_debug_gui=user_debug_gui
-    #                     )
 
     env = TrajectoryPlanningEnv(drone_model=DEFAULT_DRONES,
                                  num_drones=DEFAULT_NUM_DRONES,
@@ -254,8 +236,6 @@ def run(
     #### Obtain the PyBullet Client ID from the environment ####
     PYB_CLIENT = env.getPyBulletClient()
 
-    #### Begin RRT(*) algorithm here ####
-
     # Get obstacles from the environment
     obstacles = env.get_obstacles()
 
@@ -268,14 +248,6 @@ def run(
         return
 
     print("RRT path found:", path)
-    
-    #time.sleep(20)
-    #### Initialize the logger #################################
-    # logger = Logger(logging_freq_hz=control_freq_hz,
-    #                 num_drones=num_drones,
-    #                 output_folder=output_folder,
-    #                 colab=colab
-    #                 )
 
     #### Initialize the controllers ############################
     # if drone in [DroneModel.CF2X, DroneModel.CF2P]:
@@ -313,36 +285,10 @@ def run(
             
             env.render()
             sync(step + (k-1)*int(2*env.CTRL_FREQ), START, env.CTRL_TIMESTEP)
-        #### Log the simulation ####################################
-        # for j in range(num_drones):
-        #     logger.log( drone=j,
-        #                 timestamp=i / env.CTRL_FREQ,
-        #                 state=obs[j],
-        #                 control=np.hstack([target, np.zeros(9)])  # Logging the target position with padding for consistency
-        #                 )
 
-        #### Printout ##############################################
-            #
-
-        #### Sync the simulation ###################################
-        # if gui:
-        #     sync(i, START, env.CTRL_TIMESTEP)
-
-            
-
-    #### Close the environment #################################
     env.close()
 
-    # #### Save the simulation results ###########################
-    # logger.save()
-    # logger.save_as_csv("rrt") # Optional CSV save
-
-    # #### Plot the simulation results ###########################
-    # if plot:
-    #     logger.plot()
-
 if __name__ == "__main__":
-    #### Define and parse (optional) arguments for the script ##
     parser = argparse.ArgumentParser(description='Helix flight script using CtrlAviary and DSLPIDControl')
     parser.add_argument('--drone',              default=DEFAULT_DRONES,     type=DroneModel,    help='Drone model (default: CF2X)', metavar='', choices=DroneModel)
     parser.add_argument('--num_drones',         default=DEFAULT_NUM_DRONES,          type=int,           help='Number of drones (default: 3)', metavar='')
