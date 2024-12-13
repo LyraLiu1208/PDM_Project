@@ -177,7 +177,6 @@ class RRT:
 
     def edge_in_collision(self, from_node, to_node):
         direction = to_node - from_node
-        distance = np.linalg.norm(direction)
         samples = []
         nr = 50
         for i in range(1,nr-1):
@@ -210,7 +209,7 @@ class RRT:
         goal_reached = False
         while i < 1500 or not best_path:
             i = i + 1
-            print(i)
+            print(f"i = {i}, N = {N}")
             
             # if i%100 == 0:
             #     p.removeAllUserDebugItems()
@@ -230,7 +229,7 @@ class RRT:
             best_neigbor = self.lowest_cost_neighbor(rand_point) #Return closest neighbour point for rand_point
             #new_point = self.steer(nearest, rand_point)
             new_point = rand_point
-            if not best_neigbor is None:
+            if best_neigbor is not None:
                 N = N + 1
                 print(f"\n\n radius is: {self.radius} m \n\n")
                 self.tree.append(new_point)
