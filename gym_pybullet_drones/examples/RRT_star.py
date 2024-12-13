@@ -51,7 +51,7 @@ class RRT:
     def __init__(self, start, goal, obstacles, obstacle_ids, bounds, step_size=0.1, max_iter=1000, debug=False):
         self.start = np.array(start)
         self.goal = np.array(goal)
-        self.radius = 0.7
+        self.radius = 1
         self.parents = {tuple(start):None}
         self.costs = {tuple(start):0}
         self.edges = {(tuple(start), tuple(start)):None}
@@ -107,13 +107,14 @@ class RRT:
         """Find the nearest neighbor in the tree to the given point."""
         distances = []
         for i in range(len(self.tree)):
-            if not np.array_equal(self.tree[i], self.goal): #self.goal not in self.tree:
-                distance = [np.linalg.norm(point - self.tree[i])]
-                distances.append(distance)
-            else:
-                distance = [np.linalg.norm(np.array([1000,1000,1000]))]
-                distance.append(distance)
-        return self.tree[np.argmin(distances)]
+            distance = [np.linalg.norm(point - self.tree[i])]
+            distances.append(distance)
+        indices = np.argsort(distances)
+
+        for index in indices:
+            if not self.edge_in_collision(self.tree[int(index)], point):
+                return self.tree[int(index)]
+        return None
     
 
 
@@ -223,39 +224,37 @@ class RRT:
             best_neigbor = self.lowest_cost_neighbor(rand_point) #Return closest neighbour point for rand_point
             #new_point = self.steer(nearest, rand_point)
             new_point = rand_point
+            if not best_neigbor is None:
+                self.tree.append(new_point)
+                #self.parents[tuple(new_point)] = best_neigbor
+                self.alter_parent(new_point, best_neigbor)
+                self.costs[tuple(new_point)] = self.cost(best_neigbor) + np.linalg.norm(best_neigbor - new_point)
+                self.rewire(new_point)
 
-            
+                #self.costs[tuple(self.goal)] = 0
+                if goal_reached:
+                    path = [self.goal]
+                    while path[-1] is not None:
+                        path.append(self.parents[tuple(path[-1])])
+                    path = path[::-1][2:]
+                
+                    for node in path:
+                        self.costs[tuple(node)] = self.costs[tuple(self.parents[tuple(node)])] + np.linalg.norm(node - self.parents[tuple(node)])
+                
+                
+                if not self.edge_in_collision(new_point, self.goal): # and best_cost > 1000:
+                    if self.cost(new_point) + np.linalg.norm(new_point - self.goal) < self.costs[tuple(self.goal)]:
+                        goal_reached = True
+                        #self.tree.append(self.goal)
+                        #self.parents[tuple(self.goal)] = new_point
+                        self.alter_parent(self.goal, new_point)
+                        self.costs[tuple(self.goal)] = self.cost(new_point) + np.linalg.norm(new_point - self.goal)
 
-            self.tree.append(new_point)
-            #self.parents[tuple(new_point)] = best_neigbor
-            self.alter_parent(new_point, best_neigbor)
-            self.costs[tuple(new_point)] = self.cost(best_neigbor) + np.linalg.norm(best_neigbor - new_point)
-            self.rewire(new_point)
-
-            #self.costs[tuple(self.goal)] = 0
-            if goal_reached:
-                path = [self.goal]
-                while path[-1] is not None:
-                    path.append(self.parents[tuple(path[-1])])
-                path = path[::-1][2:]
-            
-                for node in path:
-                    self.costs[tuple(node)] = self.costs[tuple(self.parents[tuple(node)])] + np.linalg.norm(node - self.parents[tuple(node)])
-               
-            
-            if not self.edge_in_collision(new_point, self.goal): # and best_cost > 1000:
-                if self.cost(new_point) + np.linalg.norm(new_point - self.goal) < self.costs[tuple(self.goal)]:
-                    goal_reached = True
-                    #self.tree.append(self.goal)
-                    #self.parents[tuple(self.goal)] = new_point
-                    self.alter_parent(self.goal, new_point)
-                    self.costs[tuple(self.goal)] = self.cost(new_point) + np.linalg.norm(new_point - self.goal)
-
-            
-            if self.cost(self.goal) < best_cost:
-                best_cost = self.cost(self.goal)
-                best_path = self.construct_path(b)
-                b = b+1
+                
+                if self.cost(self.goal) < best_cost:
+                    best_cost = self.cost(self.goal)
+                    best_path = self.construct_path(b)
+                    b = b+1
 
             # Print progress at every 100 iterations
             if i % 100 == 0:
@@ -384,7 +383,7 @@ def run(
     bounds = np.array([
         [-5, 5],  # X-axis bounds
         [-5, 5],  # Y-axis bounds
-        [0.5, 0.5],   # Z-axis bounds
+        [0.1, 1.2],   # Z-axis bounds
     ])
 
     H = .1
