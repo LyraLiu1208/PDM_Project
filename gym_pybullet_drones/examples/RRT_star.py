@@ -155,14 +155,19 @@ class RRT:
     
     def lowest_cost_neighbor(self, new_node):
         best_neighbor = []
+        costs = []
+        neighbors = []
         #for i in range(len(self.tree)):
         for neighbor in self.near(new_node):
             #neighbor = self.tree[i]
-            if not self.edge_in_collision(neighbor, new_node):
-                new_cost = self.cost(neighbor) + np.linalg.norm(new_node - neighbor)
-                if new_cost < self.cost(new_node):
-                    self.costs[tuple(new_node)] = new_cost
-                    best_neighbor = neighbor
+            neighbors.append(neighbor)
+            costs.append(self.cost(neighbor) + np.linalg.norm(new_node - neighbor))
+        indices = np.argsort(costs)
+        for index in indices:
+            if not self.edge_in_collision(neighbors[int(index)], new_node):
+                self.costs[tuple(new_node)] = costs[int(index)]
+                best_neighbor = neighbors[int(index)]
+                break
             
         if self.cost(new_node) == float('inf'):
             return self.nearest_neighbor(new_node)
@@ -201,6 +206,7 @@ class RRT:
         self.costs[tuple(self.goal)] = float('inf')
         i = 0
         b = 0
+        N = 2
         goal_reached = False
         while i < 1500 or not best_path:
             i = i + 1
@@ -219,12 +225,14 @@ class RRT:
             #             break
 
 
-
+            self.radius = 2*(np.log(N)/N)**(1/3)
             rand_point = self.get_random_point()        #Returns randiom collision free point (collision check is done inside the function call)
             best_neigbor = self.lowest_cost_neighbor(rand_point) #Return closest neighbour point for rand_point
             #new_point = self.steer(nearest, rand_point)
             new_point = rand_point
             if not best_neigbor is None:
+                N = N + 1
+                print(f"\n\n radius is: {self.radius} m \n\n")
                 self.tree.append(new_point)
                 #self.parents[tuple(new_point)] = best_neigbor
                 self.alter_parent(new_point, best_neigbor)
