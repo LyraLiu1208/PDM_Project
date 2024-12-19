@@ -1,20 +1,3 @@
-"""Script demonstrating the joint use of simulation and control.
-
-The simulation is run by a `CtrlAviary` environment.
-The control is given by the PID implementation in `DSLPIDControl`.
-
-Example
--------
-In a terminal, run as:
-
-    $ python pid.py
-
-Notes
------
-The drones move, at different altitudes, along cicular trajectories 
-in the X-Y plane, around point (0, -.3).
-
-"""
 import os
 import time
 import argparse
@@ -27,10 +10,10 @@ import pybullet as p
 import matplotlib.pyplot as plt
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
-from gym_pybullet_drones.envs.CtrlAviary import CtrlAviary
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.utils.utils import sync, str2bool
+from gym_pybullet_drones.envs.WareHouse import WarehouseEnvironment
 
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
@@ -46,6 +29,8 @@ DEFAULT_DURATION_SEC = 12
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
 debug = False
+include_static=True
+include_dynamic=False
 
 class RRT:
     def __init__(self, start, goal, obstacles, bounds, step_size=0.1, max_iter=1000, debug=False):
@@ -175,24 +160,6 @@ class RRT:
             print(f"Constructed path: {path}")
         return path[::-1]
 
-class TrajectoryPlanningEnv(CtrlAviary):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.obstacles = []
-        self._add_obstacles()
-
-    def _add_obstacles(self):
-        """Add static obstacles to the environment."""
-        self.obstacles.append((np.array([1, 1, 0.5]), np.array([0.4, 0.4, 0.4])))
-        self.obstacles.append((np.array([-1, -1, 0.8]), np.array([0.2, 0.2, 0.6])))
-        for center, size in self.obstacles:
-            col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=size / 2)
-            p.createMultiBody(baseMass=0, baseCollisionShapeIndex=col_shape, basePosition=center)
-
-    def get_obstacles(self):
-        """Return the list of obstacles in the environment."""
-        return self.obstacles
-
 def run(
         drone=DEFAULT_DRONES,
         num_drones=DEFAULT_NUM_DRONES,
@@ -207,18 +174,23 @@ def run(
         duration_sec=DEFAULT_DURATION_SEC,
         output_folder=DEFAULT_OUTPUT_FOLDER,
         colab=DEFAULT_COLAB,
-        debug = debug
-        ):
-    #### Initialize the simulation #############################
-    # Define start, goal, and bounds
-    start = np.array([-1.5, -1.5, 0.2])
-    goal = np.array([1.5, 1.5, 0.8])
+        debug=debug
+):
+    """
+    Execute the RRT path planning in the warehouse environment.
+    """
+    # Define start and goal points based on the warehouse layout
+    start = np.array([0.5, -1.0, 0.3])  # Start near the bottom-left corner of the first aisle
+    goal = np.array([3.5, 5.0, 0.1])   # Goal near the top-right corner of the second aisle
+
+    # Define bounds for the warehouse environment
     bounds = np.array([
-        [-1.6, 1.6],  # X-axis bounds
-        [-1.6, 1.6],  # Y-axis bounds
-        [0, 1],   # Z-axis bounds
+        [-0.5, 4.5],  # X-axis bounds (covering all aisles)
+        [-1.5, 9.0],  # Y-axis bounds
+        [0.0, 1.0]    # Z-axis bounds
     ])
 
+    # Initialize the warehouse environment
     H = .1
     H_STEP = .05
     R = .3
@@ -226,30 +198,28 @@ def run(
     INIT_XYZS = np.array([start])
     INIT_RPYS = np.array([[0, 0,  0] for i in range(num_drones)])
 
-
-    #### Create the environment ################################
-
-    env = TrajectoryPlanningEnv(drone_model=DEFAULT_DRONES,
-                                 num_drones=DEFAULT_NUM_DRONES,
-                                 initial_xyzs=INIT_XYZS,
-                                 initial_rpys=INIT_RPYS,
-                                 physics=DEFAULT_PHYSICS,
-                                 neighbourhood_radius=10,
-                                 pyb_freq=DEFAULT_SIMULATION_FREQ_HZ,
-                                 ctrl_freq=DEFAULT_CONTROL_FREQ_HZ,
-                                 gui=DEFAULT_GUI,
-                                 record=False,
-                                 obstacles=False
+    env = WarehouseEnvironment( include_static=include_static, 
+                                include_dynamic=include_dynamic,
+                                drone_model=DEFAULT_DRONES,
+                                num_drones=DEFAULT_NUM_DRONES,
+                                initial_xyzs=INIT_XYZS,
+                                initial_rpys=INIT_RPYS,
+                                physics=DEFAULT_PHYSICS,
+                                neighbourhood_radius=10,
+                                pyb_freq=DEFAULT_SIMULATION_FREQ_HZ,
+                                ctrl_freq=DEFAULT_CONTROL_FREQ_HZ,
+                                gui=DEFAULT_GUI,
+                                record=False,
+                                obstacles=False
                                  )
-    
-    #### Obtain the PyBullet Client ID from the environment ####
     PYB_CLIENT = env.getPyBulletClient()
 
-    # Get obstacles from the environment
-    obstacles = env.get_obstacles()
+    # Get static and dynamic obstacles
+    obstacles, _ = env.get_obstacles()
 
     # Plan path using RRT
-    rrt = RRT(start, goal, obstacles, bounds, step_size=0.3, max_iter=5000, debug=True)
+    print("Planning path using RRT...")
+    rrt = RRT(start, goal, obstacles, bounds, step_size=0.3, max_iter=5000, debug=debug)
     path = rrt.plan()
 
     if not path:
@@ -277,6 +247,8 @@ def run(
         for step in range(0, int(2*env.CTRL_FREQ)):  # Adjust loop for smooth movement
             for i in range(DEFAULT_NUM_DRONES):
                 # Compute control action for the drone
+                if include_dynamic:
+                    env.update_dynamic_obstacles()
                 action[i, :], _, _ = ctrl[i].computeControlFromState(
                     control_timestep=env.CTRL_TIMESTEP,
                     state=obs[i],
