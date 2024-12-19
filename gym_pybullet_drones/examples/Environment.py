@@ -21,8 +21,7 @@ def run():
     """
     Initialize and render the warehouse environment without any planning.
     """
-    # Initialize the Warehouse Environment
-    env = WarehouseEnvironment(drone_model=DEFAULT_DRONES, gui=DEFAULT_GUI)
+    env = WarehouseEnvironment(include_static=True, include_dynamic=True, drone_model=DEFAULT_DRONES, gui=DEFAULT_GUI)
     PYB_CLIENT = env.getPyBulletClient()
 
     # Render the environment to visualize obstacles and dynamics
