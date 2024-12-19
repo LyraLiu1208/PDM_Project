@@ -6,6 +6,8 @@
 
 **objective:** Develop a baseline, which is a simple RRT
 
+---
+
 ### week 4 - Baseline initial development
 
 **how to run:**
@@ -26,6 +28,8 @@ python RRT_trial.py --debug
 **Probelm:**
 
 After some debugging, I found the problem is when the path recheaes the goal, the code gets stuck, more specifically, in function ```nearest_neighbor```. 
+
+---
 
 ### week 5 - Baseline betterment
 
@@ -109,6 +113,8 @@ racer.urdf
 | `F_max` (Maximum Thrust)    | 33.84 N                                | Maximum thrust produced (based on thrust2weight)|
 | `a_max` (Maximum Acceleration) | \( 40.77 \, \text{m/s}^2 \)         | Calculated maximum acceleration                |
 
+---
+
 ## Warehouse Simulation Environment
 
 ### `WareHouse.py`
@@ -132,8 +138,6 @@ Simulates a **detailed warehouse environment** with shelves and dynamic workers 
    - `update_dynamic_obstacles`: Updates worker positions along their paths.
    - `get_obstacles`: Returns a list of static and dynamic obstacles.
 
----
-
 ### `Environment.py`
 
 #### Purpose
@@ -143,7 +147,6 @@ Provides a **basic warehouse setup** for simpler simulations or custom experimen
 - **Static Shelves:** Same layout as `WareHouse.py`.
 - **Dynamic Workers:** Simplified movement paths compared to `WareHouse.py`.
 
----
 
 ### Usage
 - Use **`WareHouse.py`** for detailed simulations with dynamic worker paths.
