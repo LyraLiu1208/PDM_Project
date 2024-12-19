@@ -108,3 +108,49 @@ racer.urdf
 | `dw_coeff_3`                | -0.11                                  | Downwash coefficient 3                         |
 | `F_max` (Maximum Thrust)    | 33.84 N                                | Maximum thrust produced (based on thrust2weight)|
 | `a_max` (Maximum Acceleration) | \( 40.77 \, \text{m/s}^2 \)         | Calculated maximum acceleration                |
+
+## Warehouse Simulation Environment
+
+### `WareHouse.py`
+
+#### Purpose
+Simulates a **detailed warehouse environment** with shelves and dynamic workers following fixed paths.
+
+#### Features
+1. **Static Shelves**
+   - Dimensions: **Width: 0.4**, **Depth: 2.0**, **Height: 1.0**.
+   - Arranged in rows with aisles and colored gray.
+
+2. **Dynamic Workers**
+   - Two workers with predefined, looped paths:
+     - **Worker 1 (Red):** Navigates between the first and second aisle.
+     - **Worker 2 (Yellow):** Navigates between the second and third aisle.
+   - Collision-free paths with smooth movement.
+
+3. **Key Methods**
+   - `_add_warehouse_obstacles`: Creates the warehouse layout and initializes workers.
+   - `update_dynamic_obstacles`: Updates worker positions along their paths.
+   - `get_obstacles`: Returns a list of static and dynamic obstacles.
+
+---
+
+### `Environment.py`
+
+#### Purpose
+Provides a **basic warehouse setup** for simpler simulations or custom experiments.
+
+#### Features
+- **Static Shelves:** Same layout as `WareHouse.py`.
+- **Dynamic Workers:** Simplified movement paths compared to `WareHouse.py`.
+
+---
+
+### Usage
+- Use **`WareHouse.py`** for detailed simulations with dynamic worker paths.
+- Use **`Environment.py`** for simpler setups or as a template for new simulations.
+- **Customization:** Modify worker paths (`worker_paths`) or add obstacles in `_add_warehouse_obstacles`.
+
+### Visualization
+Below is an example of the warehouse environment:
+
+![Warehouse Simulation](images/warehouse.png)
