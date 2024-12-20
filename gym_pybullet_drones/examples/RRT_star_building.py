@@ -183,17 +183,43 @@ class RRT_STAR:
 
 
     def alter_parent(self, node, new_parent):
-        if self.parents.get(tuple(node)) is None:
-            self.parents[tuple(node)] = new_parent
-            self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
-        else:
-            p.removeUserDebugItem(self.edges[(tuple(node),tuple(self.parents[tuple(node)]))])
-            self.parents[tuple(node)] = new_parent
-            self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
-            self.children[tuple(self.parents.get(tuple(node)))].remove(node)
-        self.children[tuple(new_parent)].append(node)
+        # if self.parents.get(tuple(node)) is None:
+        #     self.parents[tuple(node)] = new_parent
+        #     self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
+        # else:
+        #     p.removeUserDebugItem(self.edges[(tuple(node),tuple(self.parents[tuple(node)]))])
+        #     self.parents[tuple(node)] = new_parent
+        #     self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
+        #     self.children[tuple(self.parents.get(tuple(node)))].remove(node)
+        # self.children[tuple(new_parent)].append(node)
+        """Change the parent of a node and update edges and children tracking."""
+        node_tuple = tuple(node)
+        new_parent_tuple = tuple(new_parent)
 
-            
+        # Remove edge and update children tracking for the old parent
+        old_parent = self.parents.get(node_tuple)
+        if old_parent is not None:
+            # Remove the visual debug line for the old edge
+            if (node_tuple, tuple(old_parent)) in self.edges:
+                p.removeUserDebugItem(self.edges[(node_tuple, tuple(old_parent))])
+                del self.edges[(node_tuple, tuple(old_parent))]
+            # Remove this node from the old parent's children list
+            if tuple(old_parent) in self.children:
+                self.children[tuple(old_parent)] = [
+                    child for child in self.children[tuple(old_parent)] if not np.array_equal(child, node)
+                ]
+
+        # Set the new parent
+        self.parents[node_tuple] = new_parent
+
+        # Add the visual debug line for the new edge
+        self.edges[(node_tuple, new_parent_tuple)] = p.addUserDebugLine(node, new_parent, [1, 0, 0], 3)
+
+        # Add this node as a child of the new parent
+        if new_parent_tuple not in self.children:
+            self.children[new_parent_tuple] = []
+        self.children[new_parent_tuple].append(node)
+                
 
     def plan(self):
         """Plan a path using RRT."""
@@ -381,7 +407,7 @@ def run(
     obstacles = env.get_obstacles()
     obstacle_ids = []
     # Plan path using RRT
-    rrt_star = RRT_STAR(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=200, debug=True)
+    rrt_star = RRT_STAR(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=1000, debug=True)
     path = rrt_star.plan()
     reference_path = rrt_star.create_ref_from_path(path)
     p.removeAllUserDebugItems()
