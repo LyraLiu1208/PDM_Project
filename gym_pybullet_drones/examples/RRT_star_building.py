@@ -201,7 +201,7 @@ class RRT_STAR:
         if old_parent is not None:
             # Remove the visual debug line for the old edge
             if (node_tuple, tuple(old_parent)) in self.edges:
-                p.removeUserDebugItem(self.edges[(node_tuple, tuple(old_parent))])
+                #p.removeUserDebugItem(self.edges[(node_tuple, tuple(old_parent))])
                 del self.edges[(node_tuple, tuple(old_parent))]
             # Remove this node from the old parent's children list
             if tuple(old_parent) in self.children:
@@ -213,7 +213,7 @@ class RRT_STAR:
         self.parents[node_tuple] = new_parent
 
         # Add the visual debug line for the new edge
-        self.edges[(node_tuple, new_parent_tuple)] = p.addUserDebugLine(node, new_parent, [1, 0, 0], 3)
+        #self.edges[(node_tuple, new_parent_tuple)] = p.addUserDebugLine(node, new_parent, [1, 0, 0], 3)
 
         # Add this node as a child of the new parent
         if new_parent_tuple not in self.children:
@@ -368,12 +368,12 @@ def run(
     #### Initialize the simulation #############################
     # Define start and goal points based on the warehouse layout
     start = np.array([0, -1.0, 0.5])  # Start near the bottom-left corner of the first aisle
-    goal = np.array([0, 4.0, 0.5])   # Goal near the top-right corner of the second aisle
+    goal = np.array([0, 6.5, 0.5])   # Goal near the top-right corner of the second aisle
 
     # Define bounds for the warehouse environment
     bounds = np.array([
         [-2, 2],  # X-axis bounds (covering all aisles)
-        [-1.5, 4.5],  # Y-axis bounds
+        [-1.5, 8],  # Y-axis bounds
         [0.1, 1.5]    # Z-axis bounds
     ])
 
