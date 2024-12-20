@@ -14,21 +14,28 @@ class CollapsedBuildingEnvironment(CtrlAviary):
 
 
     def _add_static_obstacles(self):
-        """
-        Add static shelves to the warehouse.
-        """
-        num_shelves_per_row = 4
-        num_rows = 3
-        shelf_size = np.array([0.4, 2.0, 1.0])  # Width, depth, height
-        aisle_width = 1.0
+        #self._add_static_box(position, shelf_size (width, depth, height), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([0,0,0.3]), np.array([4, 0.2, 0.6]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([0,0,1.2]), np.array([4, 0.2, 0.6]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([0,0,0.75]), np.array([2, 0.2, 0.6]), color=[0.5, 0.5, 0.5])  # Gray color
 
-        for row in range(num_rows):
-            row_y = row * (shelf_size[1] + aisle_width)
-            for shelf in range(num_shelves_per_row):
-                x_position = shelf * (shelf_size[0] + aisle_width)
-                position = np.array([x_position, row_y, shelf_size[2] / 2])
-                self._add_static_box(position, shelf_size, color=[0.5, 0.5, 0.5])  # Gray color
 
+        self._add_static_box(np.array([0,1.5,0.2]), np.array([4, 0.2, 0.4]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([0,1.5,1.15]), np.array([4, 0.2, 0.7]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([-1.5,1.5,0.75]), np.array([1, 0.2, 0.9]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([1.5,1.5,0.75]), np.array([1, 0.2, 0.9]), color=[0.5, 0.5, 0.5])  # Gray color
+
+        self._add_static_box(np.array([0,3,0.75]), np.array([1, 0.2, 1.5]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([-1.5,3,0.75]), np.array([1, 0.2, 1.5]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([1.5,3,0.75]), np.array([1, 0.2, 1.5]), color=[0.5, 0.5, 0.5])  # Gray color
+
+        self._add_static_box(np.array([-1, 3,1.3]), np.array([1, 0.2, 0.4]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([1,3,0.2]), np.array([1, 0.2, 0.4]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([1,3,1.2]), np.array([1, 0.2, 0.6]), color=[0.5, 0.5, 0.5])  # Gray color
+
+
+        self._add_static_box(np.array([-2,1.5,0.75]), np.array([0.2, 3, 1.5]), color=[0.5, 0.5, 0.5])  # Gray color
+        self._add_static_box(np.array([2,1.5,0.75]), np.array([0.2, 3, 1.5]), color=[0.5, 0.5, 0.5])  # Gray color
     
     def _add_static_box(self, position, size, color):
         col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=size / 2)

@@ -14,6 +14,7 @@ from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.utils.utils import sync, str2bool
 from gym_pybullet_drones.envs.CollapsedBuilding import CollapsedBuildingEnvironment
+from collections import defaultdict
 
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
@@ -36,7 +37,7 @@ class RRT_STAR:
     def __init__(self, start, goal, obstacles, obstacle_ids, bounds, step_size=0.1, max_iter=1000, debug=False):
         self.start = np.array(start)
         self.goal = np.array(goal)
-        self.radius = 1
+        self.radius_const = 3
         self.parents = {tuple(start):None}
         self.costs = {tuple(start):0}
         self.edges = {(tuple(start), tuple(start)):None}
@@ -48,6 +49,7 @@ class RRT_STAR:
         self.path = []
         self.debug = debug
         self.obstacle_ids = obstacle_ids
+        self.children = defaultdict(list)
 
 
 
@@ -70,8 +72,8 @@ class RRT_STAR:
         for obstacle in self.obstacles:
             center, size = obstacle
             if all(abs(point - center) <= (size+np.array([0.130,0.130,0.030])) / 2):
-                if self.debug:
-                    print(f"Collision detected at {point} with obstacle at {center}")
+                # if self.debug:
+                #     print(f"Collision detected at {point} with obstacle at {center}")
                 return True
         return False
 
@@ -79,12 +81,10 @@ class RRT_STAR:
 
     def get_random_point(self):
         """Generate a random point within bounds."""
-        point = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1])
-        if self.is_in_collision(point):
-            point = self.get_random_point()
-        if self.debug:
-            print(f"Generated random point: {point}")
-        return point
+        while True:
+            point = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1])
+            if not self.is_in_collision(point):
+                return point
 
 
 
@@ -92,8 +92,8 @@ class RRT_STAR:
         """Find the nearest neighbor in the tree to the given point."""
         distances = []
         for i in range(len(self.tree)):
-            distance = [np.linalg.norm(point - self.tree[i])]
-            distances.append(distance)
+            #distance = [np.linalg.norm(point - self.tree[i])]
+            distances.append(np.linalg.norm(point - self.tree[i]))
         indices = np.argsort(distances)
 
         for index in indices:
@@ -136,12 +136,23 @@ class RRT_STAR:
                     self.alter_parent(neighbor, new_node)
                     #self.parents[tuple(neighbor)] = new_node
                     self.costs[tuple(neighbor)] = new_cost
+                    self.propagate_cost_updates(neighbor)
                 
-    
+    def propagate_cost_updates(self, node):
+        for child in self.children_of(node):
+            self.costs[tuple(child)] = self.costs[tuple(node)] + np.linalg.norm(child - node)
+            # Recursively update its children
+            self.propagate_cost_updates(child)
+
+    def children_of(self, node):
+        """Return the list of children of a given node."""
+        return self.children.get(tuple(node), [])
+
     def lowest_cost_neighbor(self, new_node):
         best_neighbor = []
         costs = []
         neighbors = []
+        found = False
         #for i in range(len(self.tree)):
         for neighbor in self.near(new_node):
             #neighbor = self.tree[i]
@@ -152,9 +163,10 @@ class RRT_STAR:
             if not self.edge_in_collision(neighbors[int(index)], new_node):
                 self.costs[tuple(new_node)] = costs[int(index)]
                 best_neighbor = neighbors[int(index)]
+                found = True
                 break
             
-        if self.cost(new_node) == float('inf'):
+        if not found:
             return self.nearest_neighbor(new_node)
         else:
             return best_neighbor
@@ -162,11 +174,9 @@ class RRT_STAR:
 
     def edge_in_collision(self, from_node, to_node):
         direction = to_node - from_node
-        samples = []
-        nr = 25
+        nr = 50
         for i in range(1,nr-1):
-            samples.append(from_node + 1/nr*(i)*direction)
-        for sample in samples:
+            sample = from_node + 1/nr*(i)*direction
             if self.is_in_collision(sample):
                 return True
         return False
@@ -180,6 +190,8 @@ class RRT_STAR:
             p.removeUserDebugItem(self.edges[(tuple(node),tuple(self.parents[tuple(node)]))])
             self.parents[tuple(node)] = new_parent
             self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
+            self.children[tuple(self.parents.get(tuple(node)))].remove(node)
+        self.children[tuple(new_parent)].append(node)
 
             
 
@@ -194,7 +206,7 @@ class RRT_STAR:
         goal_reached = False
         while i < self.max_iter or not best_path:
             i = i + 1
-            print(f"i = {i}, N = {N}")
+            #print(f"i = {i}, N = {N}")
             
             # if i%100 == 0:
             #     p.removeAllUserDebugItems()
@@ -209,14 +221,17 @@ class RRT_STAR:
             #             break
 
 
-            self.radius = 2*(np.log(N)/N)**(1/3)
+            self.radius = self.radius_const*(np.log(N)/N)**(1/3)
             rand_point = self.get_random_point()        #Returns randiom collision free point (collision check is done inside the function call)
             best_neigbor = self.lowest_cost_neighbor(rand_point) #Return closest neighbour point for rand_point
             #new_point = self.steer(nearest, rand_point)
             new_point = rand_point
+            #p.addUserDebugText(".", new_point, textColorRGB=[0, 1, 0], textSize=2)
+            
             if best_neigbor is not None:
+                
                 N = N + 1
-                print(f"\n\n radius is: {self.radius} m \n\n")
+                #print(f"\n\n radius is: {self.radius} m \n\n")
                 self.tree.append(new_point)
                 #self.parents[tuple(new_point)] = best_neigbor
                 self.alter_parent(new_point, best_neigbor)
@@ -247,12 +262,14 @@ class RRT_STAR:
                     best_cost = self.cost(self.goal)
                     best_path = self.construct_path(b)
                     b = b+1
-
+            #else:
+                #print("No neighbour possible \n")
             # Print progress at every 100 iterations
-            if i % 100 == 0:
+            if i % 50 == 0:
                 print(f"\n\n\n\n Iteration {i}: Tree size = {len(self.tree)} \n\n\n\n")
 
         if best_path:
+            #time.sleep(10)
             return best_path
         else:
             print("Failed to find a path!")
@@ -324,14 +341,14 @@ def run(
         ):
     #### Initialize the simulation #############################
     # Define start and goal points based on the warehouse layout
-    start = np.array([0.5, -1.0, 0.3])  # Start near the bottom-left corner of the first aisle
-    goal = np.array([3.5, 5.0, 0.1])   # Goal near the top-right corner of the second aisle
+    start = np.array([0, -1.0, 0.5])  # Start near the bottom-left corner of the first aisle
+    goal = np.array([0, 4.0, 0.5])   # Goal near the top-right corner of the second aisle
 
     # Define bounds for the warehouse environment
     bounds = np.array([
-        [-0.5, 4.5],  # X-axis bounds (covering all aisles)
-        [-1.5, 9.0],  # Y-axis bounds
-        [0.0, 1.0]    # Z-axis bounds
+        [-2, 2],  # X-axis bounds (covering all aisles)
+        [-1.5, 4.5],  # Y-axis bounds
+        [0.1, 1.5]    # Z-axis bounds
     ])
 
     H = .1
@@ -368,9 +385,9 @@ def run(
     path = rrt_star.plan()
     reference_path = rrt_star.create_ref_from_path(path)
     p.removeAllUserDebugItems()
-    if not path:
-        print("RRT failed to find a path!")
-        return
+    if path is not None:
+        for j in range(len(path) - 1):
+                p.addUserDebugLine(path[j], path[j + 1], [0, 0.6, 0], 2)
 
     print("RRT path found:", path)
     
