@@ -13,7 +13,8 @@ from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.utils.utils import sync, str2bool
-from gym_pybullet_drones.envs.WareHouse import WarehouseEnvironment
+from gym_pybullet_drones.envs.CollapsedBuilding import CollapsedBuildingEnvironment
+from collections import defaultdict
 
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
@@ -173,7 +174,7 @@ class RRT:
         if self.debug:
             print(f"Constructed path: {path}")
         return path[::-1]
-
+    
 def run(
         drone=DEFAULT_DRONES,
         num_drones=DEFAULT_NUM_DRONES,
@@ -190,21 +191,18 @@ def run(
         colab=DEFAULT_COLAB,
         debug=debug
 ):
-    """
-    Execute the RRT path planning in the warehouse environment.
-    """
+    #### Initialize the simulation #############################
     # Define start and goal points based on the warehouse layout
-    start = np.array([0.5, -1.0, 0.3])  # Start near the bottom-left corner of the first aisle
-    goal = np.array([3.5, 5.0, 0.1])   # Goal near the top-right corner of the second aisle
+    start = np.array([0, -1.0, 0.5])  # Start near the bottom-left corner of the first aisle
+    goal = np.array([0, 6.5, 0.5])   # Goal near the top-right corner of the second aisle
 
     # Define bounds for the warehouse environment
     bounds = np.array([
-        [-0.5, 4.5],  # X-axis bounds (covering all aisles)
-        [-1.5, 9.0],  # Y-axis bounds
-        [0.0, 1.0]    # Z-axis bounds
+        [-2, 2],  # X-axis bounds (covering all aisles)
+        [-1.5, 8],  # Y-axis bounds
+        [0.1, 1.5]    # Z-axis bounds
     ])
 
-    # Initialize the warehouse environment
     H = .1
     H_STEP = .05
     R = .3
@@ -212,9 +210,8 @@ def run(
     INIT_XYZS = np.array([start])
     INIT_RPYS = np.array([[0, 0,  0] for i in range(num_drones)])
 
-    env = WarehouseEnvironment( include_static=include_static, 
-                                include_dynamic=include_dynamic,
-                                drone_model=DEFAULT_DRONES,
+
+    env = CollapsedBuildingEnvironment(drone_model=DEFAULT_DRONES,
                                 num_drones=DEFAULT_NUM_DRONES,
                                 initial_xyzs=INIT_XYZS,
                                 initial_rpys=INIT_RPYS,
@@ -229,7 +226,7 @@ def run(
     PYB_CLIENT = env.getPyBulletClient()
 
     # Get static and dynamic obstacles
-    obstacles, _ = env.get_obstacles()
+    obstacles = env.get_obstacles()
 
     # Plan path using RRT
     print("Planning path using RRT...")
@@ -287,7 +284,9 @@ def run(
 
     env.close()
 
+
 if __name__ == "__main__":
+    #### Define and parse (optional) arguments for the script ##
     parser = argparse.ArgumentParser(description='Helix flight script using CtrlAviary and DSLPIDControl')
     parser.add_argument('--drone',              default=DEFAULT_DRONES,     type=DroneModel,    help='Drone model (default: CF2X)', metavar='', choices=DroneModel)
     parser.add_argument('--num_drones',         default=DEFAULT_NUM_DRONES,          type=int,           help='Number of drones (default: 3)', metavar='')
@@ -305,4 +304,3 @@ if __name__ == "__main__":
     ARGS = parser.parse_args()
 
     run(**vars(ARGS))
-

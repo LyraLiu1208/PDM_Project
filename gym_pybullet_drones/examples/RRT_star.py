@@ -8,6 +8,7 @@ import random
 import numpy as np
 import pybullet as p
 import matplotlib.pyplot as plt
+from collections import defaultdict
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
@@ -32,11 +33,11 @@ debug = False
 include_static=True
 include_dynamic=False
 
-class RRT:
+class RRT_STAR:
     def __init__(self, start, goal, obstacles, obstacle_ids, bounds, step_size=0.1, max_iter=1000, debug=False):
         self.start = np.array(start)
         self.goal = np.array(goal)
-        self.radius = 1
+        self.radius_const = 3
         self.parents = {tuple(start):None}
         self.costs = {tuple(start):0}
         self.edges = {(tuple(start), tuple(start)):None}
@@ -48,6 +49,7 @@ class RRT:
         self.path = []
         self.debug = debug
         self.obstacle_ids = obstacle_ids
+        self.children = defaultdict(list)
 
 
 
@@ -69,9 +71,9 @@ class RRT:
 
         for obstacle in self.obstacles:
             center, size = obstacle
-            if all(abs(point - center) <= size / 2):
-                if self.debug:
-                    print(f"Collision detected at {point} with obstacle at {center}")
+            if all(abs(point - center) <= (size+np.array([0.130,0.130,0.030])) / 2):
+                # if self.debug:
+                #     print(f"Collision detected at {point} with obstacle at {center}")
                 return True
         return False
 
@@ -79,12 +81,10 @@ class RRT:
 
     def get_random_point(self):
         """Generate a random point within bounds."""
-        point = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1])
-        if self.is_in_collision(point):
-            point = self.get_random_point()
-        if self.debug:
-            print(f"Generated random point: {point}")
-        return point
+        while True:
+            point = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1])
+            if not self.is_in_collision(point):
+                return point
 
 
 
@@ -92,8 +92,8 @@ class RRT:
         """Find the nearest neighbor in the tree to the given point."""
         distances = []
         for i in range(len(self.tree)):
-            distance = [np.linalg.norm(point - self.tree[i])]
-            distances.append(distance)
+            #distance = [np.linalg.norm(point - self.tree[i])]
+            distances.append(np.linalg.norm(point - self.tree[i]))
         indices = np.argsort(distances)
 
         for index in indices:
@@ -136,12 +136,23 @@ class RRT:
                     self.alter_parent(neighbor, new_node)
                     #self.parents[tuple(neighbor)] = new_node
                     self.costs[tuple(neighbor)] = new_cost
+                    self.propagate_cost_updates(neighbor)
                 
-    
+    def propagate_cost_updates(self, node):
+        for child in self.children_of(node):
+            self.costs[tuple(child)] = self.costs[tuple(node)] + np.linalg.norm(child - node)
+            # Recursively update its children
+            self.propagate_cost_updates(child)
+
+    def children_of(self, node):
+        """Return the list of children of a given node."""
+        return self.children.get(tuple(node), [])
+
     def lowest_cost_neighbor(self, new_node):
         best_neighbor = []
         costs = []
         neighbors = []
+        found = False
         #for i in range(len(self.tree)):
         for neighbor in self.near(new_node):
             #neighbor = self.tree[i]
@@ -152,9 +163,10 @@ class RRT:
             if not self.edge_in_collision(neighbors[int(index)], new_node):
                 self.costs[tuple(new_node)] = costs[int(index)]
                 best_neighbor = neighbors[int(index)]
+                found = True
                 break
             
-        if self.cost(new_node) == float('inf'):
+        if not found:
             return self.nearest_neighbor(new_node)
         else:
             return best_neighbor
@@ -162,26 +174,52 @@ class RRT:
 
     def edge_in_collision(self, from_node, to_node):
         direction = to_node - from_node
-        samples = []
         nr = 50
         for i in range(1,nr-1):
-            samples.append(from_node + 1/nr*(i)*direction)
-        for sample in samples:
+            sample = from_node + 1/nr*(i)*direction
             if self.is_in_collision(sample):
                 return True
         return False
 
 
     def alter_parent(self, node, new_parent):
-        if self.parents.get(tuple(node)) is None:
-            self.parents[tuple(node)] = new_parent
-            self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
-        else:
-            p.removeUserDebugItem(self.edges[(tuple(node),tuple(self.parents[tuple(node)]))])
-            self.parents[tuple(node)] = new_parent
-            self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
+        # if self.parents.get(tuple(node)) is None:
+        #     self.parents[tuple(node)] = new_parent
+        #     self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
+        # else:
+        #     p.removeUserDebugItem(self.edges[(tuple(node),tuple(self.parents[tuple(node)]))])
+        #     self.parents[tuple(node)] = new_parent
+        #     self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
+        #     self.children[tuple(self.parents.get(tuple(node)))].remove(node)
+        # self.children[tuple(new_parent)].append(node)
+        """Change the parent of a node and update edges and children tracking."""
+        node_tuple = tuple(node)
+        new_parent_tuple = tuple(new_parent)
 
-            
+        # Remove edge and update children tracking for the old parent
+        old_parent = self.parents.get(node_tuple)
+        if old_parent is not None:
+            # Remove the visual debug line for the old edge
+            if (node_tuple, tuple(old_parent)) in self.edges:
+                #p.removeUserDebugItem(self.edges[(node_tuple, tuple(old_parent))])
+                del self.edges[(node_tuple, tuple(old_parent))]
+            # Remove this node from the old parent's children list
+            if tuple(old_parent) in self.children:
+                self.children[tuple(old_parent)] = [
+                    child for child in self.children[tuple(old_parent)] if not np.array_equal(child, node)
+                ]
+
+        # Set the new parent
+        self.parents[node_tuple] = new_parent
+
+        # Add the visual debug line for the new edge
+        #self.edges[(node_tuple, new_parent_tuple)] = p.addUserDebugLine(node, new_parent, [1, 0, 0], 3)
+
+        # Add this node as a child of the new parent
+        if new_parent_tuple not in self.children:
+            self.children[new_parent_tuple] = []
+        self.children[new_parent_tuple].append(node)
+                
 
     def plan(self):
         """Plan a path using RRT."""
@@ -192,9 +230,9 @@ class RRT:
         b = 0
         N = 2
         goal_reached = False
-        while i < 1500 or not best_path:
+        while i < self.max_iter or not best_path:
             i = i + 1
-            print(f"i = {i}, N = {N}")
+            #print(f"i = {i}, N = {N}")
             
             # if i%100 == 0:
             #     p.removeAllUserDebugItems()
@@ -209,14 +247,17 @@ class RRT:
             #             break
 
 
-            self.radius = 2*(np.log(N)/N)**(1/3)
+            self.radius = self.radius_const*(np.log(N)/N)**(1/3)
             rand_point = self.get_random_point()        #Returns randiom collision free point (collision check is done inside the function call)
             best_neigbor = self.lowest_cost_neighbor(rand_point) #Return closest neighbour point for rand_point
             #new_point = self.steer(nearest, rand_point)
             new_point = rand_point
+            #p.addUserDebugText(".", new_point, textColorRGB=[0, 1, 0], textSize=2)
+            
             if best_neigbor is not None:
+                
                 N = N + 1
-                print(f"\n\n radius is: {self.radius} m \n\n")
+                #print(f"\n\n radius is: {self.radius} m \n\n")
                 self.tree.append(new_point)
                 #self.parents[tuple(new_point)] = best_neigbor
                 self.alter_parent(new_point, best_neigbor)
@@ -247,17 +288,18 @@ class RRT:
                     best_cost = self.cost(self.goal)
                     best_path = self.construct_path(b)
                     b = b+1
-
+            #else:
+                #print("No neighbour possible \n")
             # Print progress at every 100 iterations
-            if i % 100 == 0:
+            if i % 50 == 0:
                 print(f"\n\n\n\n Iteration {i}: Tree size = {len(self.tree)} \n\n\n\n")
 
         if best_path:
+            #time.sleep(10)
             return best_path
         else:
             print("Failed to find a path!")
             return []
-
 
 
 
@@ -278,6 +320,18 @@ class RRT:
         return path[::-1][1:]
 
 
+    def create_ref_from_path(self, path):
+            sample_distance = 0.05
+            ref_path = []
+            for i in range(len(path)-1):
+                segment_direction = path[i+1] - path[i]
+                segment_length = np.linalg.norm(segment_direction)
+
+                steps = round(segment_length/sample_distance)
+                ref_path.append(path[i])
+                for step in range(steps-1):
+                    ref_path.append(path[i]+step/steps*segment_direction)
+            return ref_path
 
         # path = [self.goal]
         # while True:
@@ -323,13 +377,13 @@ def run(
         [0.0, 1.0]    # Z-axis bounds
     ])
 
+    # Initialize the warehouse environment
     H = .1
     H_STEP = .05
     R = .3
     # INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
     INIT_XYZS = np.array([start])
     INIT_RPYS = np.array([[0, 0,  0] for i in range(num_drones)])
-
 
     env = WarehouseEnvironment( include_static=include_static, 
                                 include_dynamic=include_dynamic,
@@ -345,22 +399,24 @@ def run(
                                 record=False,
                                 obstacles=False
                                  )
-    
+    PYB_CLIENT = env.getPyBulletClient()
+
+    # Get static and dynamic obstacles
+    obstacles, _ = env.get_obstacles()
     #### Obtain the PyBullet Client ID from the environment ####
     PYB_CLIENT = env.getPyBulletClient()
 
     #### Begin RRT(*) algorithm here ####
 
-    # Get obstacles from the environment
-    obstacles, obstacle_ids = env.get_obstacles()
-
+    obstacle_ids = []
     # Plan path using RRT
-    rrt = RRT(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=3000, debug=True)
-    path = rrt.plan()
-
-    if not path:
-        print("RRT failed to find a path!")
-        return
+    rrt_star = RRT_STAR(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=1000, debug=True)
+    path = rrt_star.plan()
+    reference_path = rrt_star.create_ref_from_path(path)
+    p.removeAllUserDebugItems()
+    if path is not None:
+        for j in range(len(path) - 1):
+                p.addUserDebugLine(path[j], path[j + 1], [0, 0.6, 0], 2)
 
     print("RRT path found:", path)
     
@@ -381,17 +437,17 @@ def run(
     START = time.time()
     obs, reward, terminated, truncated, info = env.step(action)
     k = 0
+    time_const = 0.1
     # Follow the planned RRT path
-    for target in path:
+    for target in reference_path:
         k = k + 1
         if debug:
             p.addUserDebugText("Target", target, textColorRGB=[0, 1, 0], textSize=1.2)
 
         # Move towards each target waypoint
-        for step in range(0, int(2*env.CTRL_FREQ)):  # Adjust loop for smooth movement
+        for step in range(0, int(time_const*env.CTRL_FREQ)):  # Adjust loop for smooth movement
             for i in range(DEFAULT_NUM_DRONES):
-                if include_dynamic:
-                    env.update_dynamic_obstacles()
+
                 # Compute control action for the drone
                 action[i, :], _, _ = ctrl[i].computeControlFromState(
                     control_timestep=env.CTRL_TIMESTEP,
@@ -409,7 +465,7 @@ def run(
                 break
             
             env.render()
-            sync(step + (k-1)*int(2*env.CTRL_FREQ), START, env.CTRL_TIMESTEP)
+            sync(step + (k-1)*int(time_const*env.CTRL_FREQ), START, env.CTRL_TIMESTEP)
         #### Log the simulation ####################################
         # for j in range(num_drones):
         #     logger.log( drone=j,
