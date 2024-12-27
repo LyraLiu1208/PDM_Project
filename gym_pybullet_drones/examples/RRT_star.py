@@ -346,10 +346,55 @@ class RRT_STAR:
                     )
                 
     def propagate_cost_updates(self, node):
-        for child in self.children_of(node):
-            self.costs[tuple(child)] = self.costs[tuple(node)] + np.linalg.norm(child - node)
-            # Recursively update its children
-            self.propagate_cost_updates(child)
+        """
+        Propagate cost updates to all descendants of the given node.
+
+        Why it's needed:
+            - Ensures the tree maintains valid cost values after rewiring or other updates.
+
+        Args:
+            node (np.array): The node whose descendants' costs need to be updated.
+        """
+        # Validate that the node exists in the tree
+        if tuple(node) not in self.costs:
+            raise ValueError(f"Node {node} is not in the tree or does not have a valid cost entry.")
+
+        # Initialize a queue for breadth-first traversal
+        queue = [node]
+
+        # Traverse the tree and update costs
+        while queue:
+            current_node = queue.pop(0)
+
+            # Get the current node's children
+            children = [child for child, parent in self.parents.items() if tuple(parent) == tuple(current_node)]
+
+            for child in children:
+                # Calculate the new cost of the child
+                new_cost = self.costs[tuple(current_node)] + np.linalg.norm(
+                    np.array(child) - np.array(current_node)
+                )
+
+                # Check if the cost needs to be updated
+                if abs(self.costs[tuple(child)] - new_cost) > 1e-6:
+                    self.costs[tuple(child)] = new_cost
+
+                    # Debugging: Log the cost update
+                    if self.debug:
+                        print(f"Updated cost for node {child}: {new_cost}")
+
+                    # Visualize cost propagation in PyBullet
+                    if self.debug:
+                        p.addUserDebugLine(
+                            lineFromXYZ=current_node,
+                            lineToXYZ=child,
+                            lineColorRGB=[1, 1, 0],  # Yellow for cost updates
+                            lineWidth=2.0,
+                            lifeTime=1.0  # Temporary visualization for debugging
+                        )
+
+                # Add the child to the queue for further traversal
+                queue.append(child)
 
     def children_of(self, node):
         """Return the list of children of a given node."""
