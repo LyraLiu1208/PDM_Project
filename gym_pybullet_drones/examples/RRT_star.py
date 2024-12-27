@@ -61,6 +61,9 @@ class RRT_STAR:
             children (defaultdict): Dictionary mapping nodes to their children.
             radius_const (float): Constant used to calculate neighbor search radius.
             edges (dict): Dictionary storing edges between nodes in the tree for connection tracking.
+        
+        Raises:
+            ValueError: If inputs are invalid or incorrectly formatted.
         """
         # Validate start and goal positions
         if len(start) != 3 or len(goal) != 3:
@@ -135,14 +138,34 @@ class RRT_STAR:
             
         return False
 
-    def get_random_point(self):
-        """Generate a random point within bounds."""
-        while True:
+    def get_random_point(self, max_retries=100):
+        """
+        Generate a random collision-free point within the defined bounds.
+
+        Why it's needed:
+        - Provides random points for tree expansion while avoiding collisions.
+
+        Args:
+            max_retries (int): Maximum number of attempts to find a collision-free point.
+
+        Returns:
+            np.array: A collision-free point within bounds.
+
+        Raises:
+            RuntimeError: If a valid point cannot be found within the retry limit.
+        """
+        for _ in range(max_retries):
+            # Uniform random sampling within bounds
             point = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1])
+
+            # Check if the point is collision-free
             if not self.is_in_collision(point):
+                if self.debug:
+                    print(f"Generated collision-free point: {point}")
                 return point
 
-
+        # If no valid point is found after max retries, raise an error
+        raise RuntimeError("Failed to generate a collision-free point after maximum retries.")
 
     def nearest_neighbor(self, point):
         """Find the nearest neighbor in the tree to the given point."""
@@ -157,8 +180,6 @@ class RRT_STAR:
                 return self.tree[int(index)]
         return None
     
-
-
     def steer(self, from_node, to_node):
         """Steer from one node towards another by step size."""
         direction = to_node - from_node
