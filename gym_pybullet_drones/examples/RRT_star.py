@@ -9,6 +9,7 @@ import numpy as np
 import pybullet as p
 import matplotlib.pyplot as plt
 from collections import defaultdict
+from scipy.spatial import KDTree
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
@@ -37,11 +38,7 @@ class RRT_STAR:
     def __init__(self, start, goal, obstacles, obstacle_ids, bounds, step_size=0.1, max_iter=1000, debug=False):
         self.start = np.array(start)
         self.goal = np.array(goal)
-        self.radius_const = 3
-        self.parents = {tuple(start):None}
-        self.costs = {tuple(start):0}
-        self.edges = {(tuple(start), tuple(start)):None}
-        self.obstacles = obstacles
+        self.obstacles = obstacles  # Obstacles are represented as (center, size) tuples
         self.bounds = bounds
         self.step_size = step_size
         self.max_iter = max_iter
@@ -49,35 +46,51 @@ class RRT_STAR:
         self.path = []
         self.debug = debug
         self.obstacle_ids = obstacle_ids
-        self.children = defaultdict(list)
+        
+        # Initialize KDTree for obstacle centers for efficient nearest neighbor queries
+        self.obstacle_centers = np.array([obs[0] for obs in obstacles])  # Extract obstacle centers
+        self.kd_tree = KDTree(self.obstacle_centers)  # Build KDTree for fast spatial indexing
 
+        # Initialize RRT* attributes
+        self.costs = {tuple(self.start): 0}  # Start node cost is 0
+        self.parents = {tuple(self.start): None}  # Start node has no parent
+        self.children = defaultdict(list)  # Tracks children of each node
+        self.radius_const = 3  # Used for neighbor search radius
 
+        # Initialize edges attribute for tracking connections
+        self.edges = {}  # Dictionary to store edges between nodes
 
     def is_in_collision(self, point):
-        """Check if a point collides with any obstacle."""
-        # for obstacle_id in self.obstacle_ids:
-        #     threshold_distance = 0.01
-        #     contact_points = p.getClosestPoints(bodyA=obstacle_id, bodyB=-1, distance=threshold_distance)
+        """
+        Check if a point is in collision with any obstacle using KD-Tree for optimization.
 
-        #     # Filter for collisions near the point
-        #     collision_detected = any(
-        #         (abs(cp[5][0] - point[0]) < threshold_distance and
-        #         abs(cp[5][1] - point[1]) < threshold_distance and
-        #         abs(cp[5][2] - point[2]) < threshold_distance)
-        #         for cp in contact_points)
-        #     if collision_detected:
-        #         return True
-        # return False
+        Why it's needed:
+        - Reduces computational overhead by limiting collision checks to nearby obstacles.
+        - Ensures fast queries in environments with many obstacles.
 
-        for obstacle in self.obstacles:
-            center, size = obstacle
-            if all(abs(point - center) <= (size+np.array([0.130,0.130,0.030])) / 2):
-                # if self.debug:
-                #     print(f"Collision detected at {point} with obstacle at {center}")
-                return True
+        Args:
+            point (np.array): A 3D point in the configuration space.
+
+        Returns:
+            bool: True if the point is in collision with any obstacle, False otherwise.
+        """
+        collision_threshold = 1.0
+        nearby_indices = self.kd_tree.query_ball_point(point, collision_threshold)
+
+        for idx in nearby_indices:
+            center, size = self.obstacles[idx]
+            half_size = size / 2
+            padding = np.array([0.130, 0.130, 0.030])
+            lower_bound = center - half_size - padding
+            upper_bound = center + half_size + padding 
+
+            # Check if the point lies within the bounding box
+            if np.all(lower_bound <= point) and np.all(point <= upper_bound):
+                if self.debug:
+                    print(f"Collision detected: Point {point} intersects obstacle at {center}")
+                return True 
+            
         return False
-
-
 
     def get_random_point(self):
         """Generate a random point within bounds."""
@@ -495,21 +508,21 @@ def run(
     #     logger.plot()
 
 if __name__ == "__main__":
-    #### Define and parse (optional) arguments for the script ##
+    # Define and parse (optional) arguments for the script
     parser = argparse.ArgumentParser(description='Helix flight script using CtrlAviary and DSLPIDControl')
-    parser.add_argument('--drone',              default=DEFAULT_DRONES,     type=DroneModel,    help='Drone model (default: CF2X)', metavar='', choices=DroneModel)
-    parser.add_argument('--num_drones',         default=DEFAULT_NUM_DRONES,          type=int,           help='Number of drones (default: 3)', metavar='')
-    parser.add_argument('--physics',            default=DEFAULT_PHYSICS,      type=Physics,       help='Physics updates (default: PYB)', metavar='', choices=Physics)
-    parser.add_argument('--gui',                default=DEFAULT_GUI,       type=str2bool,      help='Whether to use PyBullet GUI (default: True)', metavar='')
-    parser.add_argument('--record_video',       default=DEFAULT_RECORD_VISION,      type=str2bool,      help='Whether to record a video (default: False)', metavar='')
-    parser.add_argument('--plot',               default=DEFAULT_PLOT,       type=str2bool,      help='Whether to plot the simulation results (default: True)', metavar='')
-    parser.add_argument('--user_debug_gui',     default=DEFAULT_USER_DEBUG_GUI,      type=str2bool,      help='Whether to add debug lines and parameters to the GUI (default: False)', metavar='')
-    parser.add_argument('--obstacles',          default=DEFAULT_OBSTACLES,       type=str2bool,      help='Whether to add obstacles to the environment (default: True)', metavar='')
-    parser.add_argument('--simulation_freq_hz', default=DEFAULT_SIMULATION_FREQ_HZ,        type=int,           help='Simulation frequency in Hz (default: 240)', metavar='')
-    parser.add_argument('--control_freq_hz',    default=DEFAULT_CONTROL_FREQ_HZ,         type=int,           help='Control frequency in Hz (default: 48)', metavar='')
-    parser.add_argument('--duration_sec',       default=DEFAULT_DURATION_SEC,         type=int,           help='Duration of the simulation in seconds (default: 5)', metavar='')
-    parser.add_argument('--output_folder',     default=DEFAULT_OUTPUT_FOLDER, type=str,           help='Folder where to save logs (default: "results")', metavar='')
-    parser.add_argument('--colab',              default=DEFAULT_COLAB, type=bool,           help='Whether example is being run by a notebook (default: "False")', metavar='')
+    parser.add_argument('--drone', default=DEFAULT_DRONES, type=DroneModel, help='Drone model (default: CF2X)', metavar='', choices=DroneModel)
+    parser.add_argument('--num_drones', default=DEFAULT_NUM_DRONES, type=int, help='Number of drones (default: 3)', metavar='')
+    parser.add_argument('--physics', default=DEFAULT_PHYSICS, type=Physics, help='Physics updates (default: PYB)', metavar='', choices=Physics)
+    parser.add_argument('--gui', default=DEFAULT_GUI, type=str2bool, help='Whether to use PyBullet GUI (default: True)', metavar='')
+    parser.add_argument('--record_video', default=DEFAULT_RECORD_VISION, type=str2bool, help='Whether to record a video (default: False)', metavar='')
+    parser.add_argument('--plot', default=DEFAULT_PLOT, type=str2bool, help='Whether to plot the simulation results (default: True)', metavar='')
+    parser.add_argument('--user_debug_gui', default=DEFAULT_USER_DEBUG_GUI, type=str2bool, help='Whether to add debug lines and parameters to the GUI (default: False)', metavar='')
+    parser.add_argument('--obstacles', default=DEFAULT_OBSTACLES, type=str2bool, help='Whether to add obstacles to the environment (default: True)', metavar='')
+    parser.add_argument('--simulation_freq_hz', default=DEFAULT_SIMULATION_FREQ_HZ, type=int, help='Simulation frequency in Hz (default: 240)', metavar='')
+    parser.add_argument('--control_freq_hz', default=DEFAULT_CONTROL_FREQ_HZ, type=int, help='Control frequency in Hz (default: 48)', metavar='')
+    parser.add_argument('--duration_sec', default=DEFAULT_DURATION_SEC, type=int, help='Duration of the simulation in seconds (default: 5)', metavar='')
+    parser.add_argument('--output_folder', default=DEFAULT_OUTPUT_FOLDER, type=str, help='Folder where to save logs (default: "results")', metavar='')
+    parser.add_argument('--colab', default=DEFAULT_COLAB, type=bool, help='Whether example is being run by a notebook (default: "False")', metavar='')
     ARGS = parser.parse_args()
 
     run(**vars(ARGS))
