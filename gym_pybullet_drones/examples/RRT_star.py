@@ -55,7 +55,8 @@ class RRT_STAR:
             tree (list): List of nodes in the RRT* tree.
             path (list): List of nodes forming the planned path.
             obstacle_centers (np.array): Extracted centers of all obstacles for KD-Tree construction.
-            kd_tree (scipy.spatial.KDTree): KD-Tree for efficient collision detection.
+            obstacle_kd_tree (scipy.spatial.KDTree): Static KDTree for obstacle centers.
+            node_kd_tree (scipy.spatial.KDTree): Dynamic KDTree for RRT* tree nodes.
             costs (dict): Dictionary storing the cost to reach each node.
             parents (dict): Dictionary storing parent-child relationships for tree nodes.
             children (defaultdict): Dictionary mapping nodes to their children.
@@ -95,15 +96,15 @@ class RRT_STAR:
         
         # Initialize KDTree for obstacle centers for efficient nearest neighbor queries
         self.obstacle_centers = np.array([obs[0] for obs in obstacles])  # Extract obstacle centers
-        self.kd_tree = KDTree(self.obstacle_centers)  # Build KDTree for fast spatial indexing # KDTree for efficient nearest-neighbor queries
+        
+        # Build KDTree for fast spatial indexing 
+        self.obstacle_kd_tree = KDTree(self.obstacle_centers)
+        self.node_kd_tree = None 
 
-        # Initialize RRT* attributes
         self.costs = {tuple(self.start): 0}  # Start node cost is 0
         self.parents = {tuple(self.start): None}  # Start node has no parent
         self.children = defaultdict(list)  # Tracks children of each node
         self.radius_const = 3  # Used for neighbor search radius
-
-        # Initialize edges attribute for tracking connections
         self.edges = {}  # Dictionary to store edges between nodes
 
     def is_in_collision(self, point):
@@ -121,7 +122,7 @@ class RRT_STAR:
             bool: True if the point is in collision with any obstacle, False otherwise.
         """
         collision_threshold = 1.0
-        nearby_indices = self.kd_tree.query_ball_point(point, collision_threshold)
+        nearby_indices = self.obstacle_kd_tree.query_ball_point(point, collision_threshold)
 
         for idx in nearby_indices:
             center, size = self.obstacles[idx]
@@ -143,7 +144,7 @@ class RRT_STAR:
         Generate a random collision-free point within the defined bounds.
 
         Why it's needed:
-        - Provides random points for tree expansion while avoiding collisions.
+            - Provides random points for tree expansion while avoiding collisions.
 
         Args:
             max_retries (int): Maximum number of attempts to find a collision-free point.
@@ -178,42 +179,16 @@ class RRT_STAR:
             point (np.array): A 3D point in the configuration space.
 
         Returns:
-            np.array: The nearest neighbor node in the tree, or None if no valid neighbor exists.
+            np.array: The nearest neighbor node in the tree.
         """
+        # Ensure KDTree for nodes is up-to-date
+        if not self.node_kd_tree or len(self.tree) != self.node_kd_tree.n:
+            self.node_kd_tree = KDTree(self.tree)
+
         # Query the KDTree for the nearest node
-        distance, index = self.kd_tree.query(point)
+        distance, index = self.node_kd_tree.query(point)
 
-        # Validate the returned index
-        if index >= len(self.tree) or index < 0:
-            if self.debug:
-                print(f"Invalid index {index} for KDTree query. Tree size: {len(self.tree)}")
-            return None
-
-        candidate = self.tree[index]
-
-        # Check if the edge between the candidate and the point is collision-free
-        if not self.edge_in_collision(candidate, point):
-            if self.debug:
-                print(f"Nearest neighbor: {candidate}, Distance: {distance}")
-            return candidate
-
-        # Fallback: Linear search for a valid nearest neighbor
-        closest_node = None
-        min_distance = float('inf')
-        for node in self.tree:
-            if not self.edge_in_collision(node, point):
-                dist = np.linalg.norm(node - point)
-                if dist < min_distance:
-                    closest_node = node
-                    min_distance = dist
-
-        # Debugging information
-        if closest_node is not None and self.debug:
-            print(f"Fallback nearest neighbor: {closest_node}, Distance: {min_distance}")
-        elif self.debug:
-            print(f"No valid nearest neighbor found for point: {point}")
-
-        return closest_node
+        return self.tree[index]
     
     def steer(self, from_node, to_node, step_size=None):
         """
@@ -257,11 +232,28 @@ class RRT_STAR:
 
         return new_node
 
-    def near(self, node):
-        """Find all nodes within given radius from new node"""
-        return [n for n in self.tree if np.linalg.norm(n - node) < self.radius] #For config space change distance metric
+    def near(self, node, radius=None):
+        """
+        Find all nodes within a specified radius of a given node.
 
+        Args:
+            node (np.array): The node for which neighbors are sought.
+            radius (float, optional): The search radius. Defaults to a calculated radius.
 
+        Returns:
+            list: A list of nodes within the specified radius.
+        """
+        if radius is None:
+            radius = self.radius_const * (np.log(len(self.tree)) / len(self.tree)) ** (1 / 3)
+
+        # Ensure KDTree for nodes is up-to-date
+        if not self.node_kd_tree or len(self.tree) != self.node_kd_tree.n:
+            self.node_kd_tree = KDTree(self.tree)
+
+        # Query the KDTree for neighbors
+        indices = self.node_kd_tree.query_ball_point(node, radius)
+
+        return [self.tree[idx] for idx in indices]
 
     def cost(self, node):
         """Return the cost of reaching a node from start"""
