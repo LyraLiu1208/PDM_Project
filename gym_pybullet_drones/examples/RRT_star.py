@@ -215,17 +215,47 @@ class RRT_STAR:
 
         return closest_node
     
-    def steer(self, from_node, to_node):
-        """Steer from one node towards another by step size."""
-        direction = to_node - from_node
-        distance = np.linalg.norm(direction)
-        if distance < self.step_size:
-            if self.debug:
-                print(f"Direct connection: {from_node} to {to_node}")
-            return to_node
-        return from_node + (direction / distance) * self.step_size
-    
+    def steer(self, from_node, to_node, step_size=None):
+        """
+        Steer from a starting node toward a target node by a specified step size.
 
+        Why it's needed:
+        - Expands the RRT* tree incrementally toward the target node.
+
+        Args:
+            from_node (np.array): Starting node [x, y, z].
+            to_node (np.array): Target node [x, y, z].
+            step_size (float, optional): Maximum step size. Defaults to `self.step_size`.
+
+        Returns:
+            np.array: A new node in the direction of `to_node`, within the step size.
+        """
+        if step_size is None:
+            step_size = self.step_size
+
+        # Compute the direction vector from `from_node` to `to_node`
+        direction = np.array(to_node) - np.array(from_node)
+        distance = np.linalg.norm(direction)
+
+        # Handle edge cases where nodes are extremely close
+        if distance < 1e-6:
+            if self.debug:
+                print(f"Nodes are too close or identical: {from_node} -> {to_node}")
+            return np.array(from_node)
+
+        # Normalize the direction vector
+        unit_direction = direction / distance
+
+        # Compute the new node, ensuring it does not overshoot the target
+        step_distance = min(step_size, distance)
+        new_node = np.array(from_node) + step_distance * unit_direction
+
+        # Debugging information
+        if self.debug:
+            print(f"Steering from {from_node} toward {to_node} with step size {step_distance}")
+            print(f"New node: {new_node}")
+
+        return new_node
 
     def near(self, node):
         """Find all nodes within given radius from new node"""
