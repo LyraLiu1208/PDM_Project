@@ -36,12 +36,39 @@ include_dynamic=False
 
 class RRT_STAR:
     def __init__(self, start, goal, obstacles, obstacle_ids, bounds, step_size=0.1, max_iter=1000, debug=False):
+        """
+        Initialize the RRT* planner.
+
+        Args:
+            start (np.array): Start position [x, y, z].
+            goal (np.array): Goal position [x, y, z].
+            obstacles (list): List of obstacles, where each obstacle is represented as a tuple (center, size).
+                - center (np.array): The center position of the obstacle [x, y, z].
+                - size (np.array): The size (width, height, depth) of the obstacle.
+            obstacle_ids (list): List of obstacle IDs (optional, used for PyBullet integration).
+            bounds (np.array): Spatial bounds for random sampling, shaped as [[min_x, max_x], [min_y, max_y], [min_z, max_z]].
+            step_size (float): Maximum step size for steering in each iteration.
+            max_iter (int): Maximum number of iterations for the planning algorithm.
+            debug (bool): Enable debug messages and visualizations.
+
+        Attributes:
+            tree (list): List of nodes in the RRT* tree.
+            path (list): List of nodes forming the planned path.
+            obstacle_centers (np.array): Extracted centers of all obstacles for KD-Tree construction.
+            kd_tree (scipy.spatial.KDTree): KD-Tree for efficient collision detection.
+            costs (dict): Dictionary storing the cost to reach each node.
+            parents (dict): Dictionary storing parent-child relationships for tree nodes.
+            children (defaultdict): Dictionary mapping nodes to their children.
+            radius_const (float): Constant used to calculate neighbor search radius.
+            edges (dict): Dictionary storing edges between nodes in the tree for connection tracking.
+        """
         self.start = np.array(start)
         self.goal = np.array(goal)
         self.obstacles = obstacles  # Obstacles are represented as (center, size) tuples
         self.bounds = bounds
         self.step_size = step_size
         self.max_iter = max_iter
+        
         self.tree = [self.start]
         self.path = []
         self.debug = debug
