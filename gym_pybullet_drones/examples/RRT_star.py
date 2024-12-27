@@ -88,14 +88,14 @@ class RRT_STAR:
         self.step_size = step_size
         self.max_iter = max_iter
 
-        self.tree = [self.start]
+        self.tree = [np.array(start)]
         self.path = []
         self.debug = debug
         self.obstacle_ids = obstacle_ids
         
         # Initialize KDTree for obstacle centers for efficient nearest neighbor queries
         self.obstacle_centers = np.array([obs[0] for obs in obstacles])  # Extract obstacle centers
-        self.kd_tree = KDTree(self.obstacle_centers)  # Build KDTree for fast spatial indexing
+        self.kd_tree = KDTree(self.obstacle_centers)  # Build KDTree for fast spatial indexing # KDTree for efficient nearest-neighbor queries
 
         # Initialize RRT* attributes
         self.costs = {tuple(self.start): 0}  # Start node cost is 0
@@ -168,17 +168,52 @@ class RRT_STAR:
         raise RuntimeError("Failed to generate a collision-free point after maximum retries.")
 
     def nearest_neighbor(self, point):
-        """Find the nearest neighbor in the tree to the given point."""
-        distances = []
-        for i in range(len(self.tree)):
-            #distance = [np.linalg.norm(point - self.tree[i])]
-            distances.append(np.linalg.norm(point - self.tree[i]))
-        indices = np.argsort(distances)
+        """
+        Find the nearest neighbor in the tree to a given point, considering static obstacles.
 
-        for index in indices:
-            if not self.edge_in_collision(self.tree[int(index)], point):
-                return self.tree[int(index)]
-        return None
+        Why it's needed:
+            - Guarantees safe tree expansion by ensuring selected neighbors are valid.
+
+        Args:
+            point (np.array): A 3D point in the configuration space.
+
+        Returns:
+            np.array: The nearest neighbor node in the tree, or None if no valid neighbor exists.
+        """
+        # Query the KDTree for the nearest node
+        distance, index = self.kd_tree.query(point)
+
+        # Validate the returned index
+        if index >= len(self.tree) or index < 0:
+            if self.debug:
+                print(f"Invalid index {index} for KDTree query. Tree size: {len(self.tree)}")
+            return None
+
+        candidate = self.tree[index]
+
+        # Check if the edge between the candidate and the point is collision-free
+        if not self.edge_in_collision(candidate, point):
+            if self.debug:
+                print(f"Nearest neighbor: {candidate}, Distance: {distance}")
+            return candidate
+
+        # Fallback: Linear search for a valid nearest neighbor
+        closest_node = None
+        min_distance = float('inf')
+        for node in self.tree:
+            if not self.edge_in_collision(node, point):
+                dist = np.linalg.norm(node - point)
+                if dist < min_distance:
+                    closest_node = node
+                    min_distance = dist
+
+        # Debugging information
+        if closest_node is not None and self.debug:
+            print(f"Fallback nearest neighbor: {closest_node}, Distance: {min_distance}")
+        elif self.debug:
+            print(f"No valid nearest neighbor found for point: {point}")
+
+        return closest_node
     
     def steer(self, from_node, to_node):
         """Steer from one node towards another by step size."""
