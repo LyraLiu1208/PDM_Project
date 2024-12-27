@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from collections import defaultdict
 from scipy.spatial import KDTree
+import random
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
@@ -382,10 +383,28 @@ class RRT_STAR:
         Args:
             new_node (np.array): The new node to add.
             parent_node (np.array): The parent node of the new node.
+
+        Updates:
+            - Adds the new node to the tree.
+            - Updates the parent in `self.parents`.
+            - Updates the child relationships in `self.children`.
+            - Calculates and stores the cost of the new node in `self.costs`.
         """
+        # Add node to the tree
         self.tree.append(new_node)
+
+        # Update parent-child relationships
         self.parents[tuple(new_node)] = tuple(parent_node)
-        self.children[tuple(parent_node)].append(new_node)  # Update child relationships
+        self.children[tuple(parent_node)].append(new_node)
+
+        # Calculate and store the cost
+        self.costs[tuple(new_node)] = self.costs[tuple(parent_node)] + np.linalg.norm(
+            np.array(new_node) - np.array(parent_node)
+        )
+
+        # Debugging: Log node addition
+        if self.debug:
+            print(f"Added node {new_node} with cost {self.costs[tuple(new_node)]}, parent {parent_node}.")
 
     def children_of(self, node):
         """
@@ -421,28 +440,58 @@ class RRT_STAR:
 
         return children
 
-    def lowest_cost_neighbor(self, new_node):
-        best_neighbor = []
-        costs = []
-        neighbors = []
-        found = False
-        #for i in range(len(self.tree)):
-        for neighbor in self.near(new_node):
-            #neighbor = self.tree[i]
-            neighbors.append(neighbor)
-            costs.append(self.cost(neighbor) + np.linalg.norm(new_node - neighbor))
-        indices = np.argsort(costs)
-        for index in indices:
-            if not self.edge_in_collision(neighbors[int(index)], new_node):
-                self.costs[tuple(new_node)] = costs[int(index)]
-                best_neighbor = neighbors[int(index)]
-                found = True
-                break
-            
-        if not found:
-            return self.nearest_neighbor(new_node)
-        else:
-            return best_neighbor
+    def lowest_cost_neighbor(self, node, radius=None):
+        """
+        Find the neighbor that provides the lowest-cost path to the given node.
+
+        Args:
+            node (np.array): The node for which the lowest-cost neighbor is sought.
+            radius (float, optional): The search radius. Defaults to a dynamic radius based on tree size.
+
+        Returns:
+            np.array: The neighbor providing the lowest-cost path, or None if no valid neighbor exists.
+        """
+        # Calculate a default radius if not provided
+        if radius is None:
+            radius = self.radius_const * (np.log(len(self.tree)) / len(self.tree)) ** (1 / 3)
+
+        # Find neighbors using KDTree
+        if not self.node_kd_tree or len(self.tree) != self.node_kd_tree.n:
+            self.node_kd_tree = KDTree(self.tree)
+        neighbor_indices = self.node_kd_tree.query_ball_point(node, radius)
+        neighbors = [self.tree[idx] for idx in neighbor_indices]
+
+        # Initialize variables for the lowest cost neighbor
+        lowest_cost = float('inf')
+        best_neighbor = None
+
+        # Iterate through neighbors to find the one with the lowest cost
+        for neighbor in neighbors:
+            if np.array_equal(neighbor, node):  # Skip the node itself
+                continue
+
+            # Check if the edge is collision-free
+            if self.edge_in_collision(node, neighbor):
+                if self.debug:
+                    print(f"Skipping neighbor {neighbor}: edge collision detected.")
+                continue
+
+            # Calculate the cost of reaching the node through this neighbor
+            cost = self.costs[tuple(neighbor)] + np.linalg.norm(np.array(neighbor) - np.array(node))
+
+            # Update the lowest-cost neighbor
+            if cost < lowest_cost:
+                lowest_cost = cost
+                best_neighbor = neighbor
+
+        # Debugging information
+        if self.debug:
+            if best_neighbor is not None:
+                print(f"Lowest-cost neighbor for node {node}: {best_neighbor} with cost {lowest_cost}")
+            else:
+                print(f"No valid neighbors found for node {node} within radius {radius}")
+
+        return best_neighbor
 
     def edge_in_collision(self, from_node, to_node):
         direction = to_node - from_node
@@ -454,42 +503,48 @@ class RRT_STAR:
         return False
 
     def alter_parent(self, node, new_parent):
-        # if self.parents.get(tuple(node)) is None:
-        #     self.parents[tuple(node)] = new_parent
-        #     self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
-        # else:
-        #     p.removeUserDebugItem(self.edges[(tuple(node),tuple(self.parents[tuple(node)]))])
-        #     self.parents[tuple(node)] = new_parent
-        #     self.edges[(tuple(node), tuple(new_parent))] = p.addUserDebugLine(node, self.parents[tuple(node)], [1, 0, 0], 3)
-        #     self.children[tuple(self.parents.get(tuple(node)))].remove(node)
-        # self.children[tuple(new_parent)].append(node)
-        """Change the parent of a node and update edges and children tracking."""
-        node_tuple = tuple(node)
-        new_parent_tuple = tuple(new_parent)
+        """
+        Alter the parent of a node and update the tree structure.
 
-        # Remove edge and update children tracking for the old parent
-        old_parent = self.parents.get(node_tuple)
-        if old_parent is not None:
-            # Remove the visual debug line for the old edge
-            if (node_tuple, tuple(old_parent)) in self.edges:
-                #p.removeUserDebugItem(self.edges[(node_tuple, tuple(old_parent))])
-                del self.edges[(node_tuple, tuple(old_parent))]
-            # Remove this node from the old parent's children list
-            if tuple(old_parent) in self.children:
-                self.children[tuple(old_parent)] = [
-                    child for child in self.children[tuple(old_parent)] if not np.array_equal(child, node)
-                ]
+        Args:
+            node (np.array): The node whose parent is being altered.
+            new_parent (np.array): The new parent node.
+        """
+        # Validate that the node exists in the tree
+        if tuple(node) not in self.parents:
+            raise ValueError(f"Node {node} is not in the tree or has no parent.")
 
-        # Set the new parent
-        self.parents[node_tuple] = new_parent
+        # Prevent redundant updates
+        current_parent = self.parents[tuple(node)]
+        if np.array_equal(current_parent, new_parent):
+            if self.debug:
+                print(f"No change: {node} already has {new_parent} as its parent.")
+            return
 
-        # Add the visual debug line for the new edge
-        #self.edges[(node_tuple, new_parent_tuple)] = p.addUserDebugLine(node, new_parent, [1, 0, 0], 3)
+        # Remove the node from its current parent's children
+        if current_parent:
+            old_children = self.children.get(tuple(current_parent), [])
+            for i, child in enumerate(old_children):
+                if np.array_equal(child, node):
+                    self.children[tuple(current_parent)].pop(i)
+                    break
 
-        # Add this node as a child of the new parent
-        if new_parent_tuple not in self.children:
-            self.children[new_parent_tuple] = []
-        self.children[new_parent_tuple].append(node)
+        # Update the parent and child relationships
+        self.parents[tuple(node)] = tuple(new_parent)
+        self.children[tuple(new_parent)].append(node)
+
+        # Recalculate the cost for the node
+        self.costs[tuple(node)] = self.costs[tuple(new_parent)] + np.linalg.norm(
+            np.array(node) - np.array(new_parent)
+        )
+
+        # Debugging: Log the parent alteration
+        if self.debug:
+            print(f"Altered parent of node {node} from {current_parent} to {new_parent}.")
+            print(f"New cost for node {node}: {self.costs[tuple(node)]}")
+
+        # Propagate cost updates to descendants
+        self.propagate_cost_updates(node)
     
     def visualize_tree_bullet(self):
         """
@@ -554,42 +609,46 @@ class RRT_STAR:
     def plan(self):
         """
         Plan a path from the start to the goal using the RRT* algorithm.
+
+        Returns:
+            list: A list of nodes forming the optimal path from start to goal.
         """
-        self.debug_items = []  # Initialize the list to track debug items
+        self.debug_items = []  # Initialize debug visualization items for PyBullet
 
         for iteration in range(self.max_iter):
+            # Sample a random point in the configuration space
             random_point = self.get_random_point()
+
+            # Find the nearest node to the sampled point
             nearest_node = self.nearest_neighbor(random_point)
+
+            # Steer towards the sampled point
             new_node = self.steer(nearest_node, random_point)
 
+            # Check if the new node is collision-free and valid
             if not self.is_in_collision(new_node):
-                self.tree.append(new_node)
-                self.parents[tuple(new_node)] = tuple(nearest_node)
-                self.costs[tuple(new_node)] = self.costs[tuple(nearest_node)] + np.linalg.norm(
-                    np.array(new_node) - np.array(nearest_node)
-                )
+                # Add the new node to the tree and update relationships
+                self.add_node(new_node, nearest_node)
 
-                # Optional rewiring logic
+                # Find the lowest-cost neighbor and alter the parent if it reduces the cost
+                best_neighbor = self.lowest_cost_neighbor(new_node)
+                if best_neighbor is not None and not np.array_equal(best_neighbor, nearest_node):
+                    self.alter_parent(new_node, best_neighbor)
+
+                # Rewire the tree to optimize paths
                 self.rewire(new_node)
 
                 # Check if the goal is reached
                 if np.linalg.norm(np.array(new_node) - np.array(self.goal)) < self.step_size:
-                    self.parents[tuple(self.goal)] = tuple(new_node)
-                    self.costs[tuple(self.goal)] = self.costs[tuple(new_node)] + np.linalg.norm(
-                        np.array(self.goal) - np.array(new_node)
-                    )
+                    self.add_node(self.goal, new_node)
                     break
 
-        # Visualize the entire tree after planning
-        self.visualize_tree_bullet()
-
-        # Final visualization with the optimal path
+        # Final visualization of the tree and optimal path
         if tuple(self.goal) in self.parents:
-            # Remove all tree-related debug items
-            for debug_id in self.debug_items:
-                p.removeUserDebugItem(debug_id)
+            # Visualize the entire tree only once the optimal path is found
+            self.visualize_tree_bullet()
 
-            # Visualize only the optimal path
+            # Construct and visualize the optimal path
             path = self.construct_path(self.goal)
             self.visualize_path_bullet(path)
             return path
@@ -605,22 +664,17 @@ class RRT_STAR:
 
         Returns:
             list: A list of nodes forming the path from start to goal.
-
-        Raises:
-            KeyError: If a node does not have a valid parent.
         """
         path = [node]
 
         while tuple(path[-1]) in self.parents:
             parent = self.parents[tuple(path[-1])]
-            if parent is None:
+            if parent is None:  # Stop at the start node
                 break
             path.append(parent)
 
-        # Reverse the path to start from the start node
         path.reverse()
 
-        # Debugging output for path validation
         if self.debug:
             print(f"Constructed path: {path}")
 
@@ -638,28 +692,95 @@ class RRT_STAR:
             list: A list of interpolated points forming a smooth path.
         """
         reference_path = []
-
-        # Ensure path is a list of numpy arrays
         path = [np.array(p) for p in path]
 
-        # Iterate through segments in the path
         for i in range(len(path) - 1):
             segment_direction = path[i + 1] - path[i]
             segment_length = np.linalg.norm(segment_direction)
 
-            # Normalize the direction vector
             unit_direction = segment_direction / segment_length
-
-            # Interpolate points along the segment
             num_samples = int(segment_length / sample_distance)
+
             for j in range(num_samples):
                 reference_point = path[i] + j * sample_distance * unit_direction
                 reference_path.append(reference_point)
 
-        # Add the final point to ensure the path ends at the goal
         reference_path.append(path[-1])
 
         return reference_path
+
+    def generate_random_point(bounds, obstacles):
+        """
+        Generate a random point within the bounds and not within any obstacle.
+
+        Args:
+            bounds (np.array): Array defining the bounds [[min_x, max_x], [min_y, max_y], [min_z, max_z]].
+            obstacles (list): List of obstacles, each defined as a tuple (center, size).
+
+        Returns:
+            np.array: A random point within the bounds and free of obstacles.
+        """
+        while True:
+            # Generate a random point within the bounds
+            point = np.array([
+                random.uniform(bounds[0][0], bounds[0][1]),  # X-axis
+                random.uniform(bounds[1][0], bounds[1][1]),  # Y-axis
+                random.uniform(bounds[2][0], bounds[2][1])   # Z-axis
+            ])
+
+            # Check if the point is in free space
+            collision = False
+            for center, size in obstacles:
+                half_size = np.array(size) / 2.0
+                lower_bound = np.array(center) - half_size
+                upper_bound = np.array(center) + half_size
+
+                if np.all(lower_bound <= point) and np.all(point <= upper_bound):
+                    collision = True
+                    break
+
+            if not collision:
+                return point
+
+def generate_random_point(bounds, obstacles):
+    """
+    Generate a random point within the bounds and not within any obstacle.
+
+    Args:
+        bounds (np.array): Array defining the bounds [[min_x, max_x], [min_y, max_y], [min_z, max_z]].
+        obstacles (list): List of obstacles, each defined as a tuple (center, size).
+
+    Returns:
+        np.array: A random point within the bounds and free of obstacles.
+
+    Raises:
+        ValueError: If obstacles is not a valid list of (center, size) pairs.
+    """
+    # Validate obstacles
+    if not isinstance(obstacles, list):
+        raise ValueError(f"Expected obstacles to be a list, but got {type(obstacles)}: {obstacles}")
+
+    while True:
+        # Generate a random point within the bounds
+        point = np.array([
+            random.uniform(bounds[0][0], bounds[0][1]),  # X-axis
+            random.uniform(bounds[1][0], bounds[1][1]),  # Y-axis
+            random.uniform(bounds[2][0], bounds[2][1])   # Z-axis
+        ])
+
+        # Check if the point is in free space
+        collision = False
+        for center, size in obstacles:
+            half_size = np.array(size) / 2.0
+            lower_bound = np.array(center) - half_size
+            upper_bound = np.array(center) + half_size
+
+            if np.all(lower_bound <= point) and np.all(point <= upper_bound):
+                collision = True
+                break
+
+        if not collision:
+            return point
 
 def run(
         drone=DEFAULT_DRONES,
