@@ -87,7 +87,7 @@ class RRT_STAR:
 
         self.tree = [np.array(start)]
         self.path = []
-        self.debug = debug
+        self.debug = True
         self.obstacle_ids = obstacle_ids
         
         # Initialize KDTree for obstacle centers for efficient nearest neighbor queries
@@ -295,7 +295,7 @@ class RRT_STAR:
             new_node (np.array): The recently added node to the tree.
 
         """
-        # Calculate the rewiring radius
+        # Calculate the rewiring radius dynamically based on tree size
         radius = self.radius_const * (np.log(len(self.tree)) / len(self.tree)) ** (1 / 3)
 
         # Find neighbors using KDTree
@@ -304,45 +304,44 @@ class RRT_STAR:
         neighbor_indices = self.node_kd_tree.query_ball_point(new_node, radius)
         neighbors = [self.tree[idx] for idx in neighbor_indices]
 
-        # Iterate through neighbors and attempt rewiring
+        # Attempt rewiring for each neighbor
         for neighbor in neighbors:
-            # Skip if neighbor is the new_node itself
-            if np.array_equal(neighbor, new_node):
+            if np.array_equal(neighbor, new_node):  # Skip self-rewiring
                 continue
-
-            # Check if the edge between new_node and neighbor is collision-free
-            if self.edge_in_collision(new_node, neighbor):
+            if self.edge_in_collision(new_node, neighbor):  # Skip if edge is in collision
                 if self.debug:
                     print(f"Skipping rewiring for neighbor {neighbor}: edge collision detected.")
                 continue
 
-            # Calculate the cost of reaching the neighbor through the new_node
+            # Calculate cost through the new_node
             cost_via_new_node = (
                 self.costs[tuple(new_node)] + np.linalg.norm(np.array(neighbor) - np.array(new_node))
             )
 
-            # Check if rewiring reduces the cost
+            # Update parent if rewiring reduces cost
             if cost_via_new_node < self.costs[tuple(neighbor)]:
-                # Update the parent and cost of the neighbor
-                old_parent = self.parents[tuple(neighbor)]
+                old_parent = self.parents.get(tuple(neighbor))
+                if old_parent:
+                    # Ensure synchronization of `self.children`
+                    old_children = self.children.get(tuple(old_parent), [])
+                    for i, child in enumerate(old_children):
+                        if np.array_equal(child, neighbor):
+                            self.children[tuple(old_parent)].pop(i)  # Remove old parent relationship
+                            break
+                    else:
+                        if self.debug:
+                            print(
+                                f"Neighbor {neighbor} not found in children of {old_parent}. "
+                                f"Current children: {self.children.get(tuple(old_parent), [])}"
+                            )
+                # Update parent and child relationships
                 self.parents[tuple(neighbor)] = tuple(new_node)
-                self.costs[tuple(neighbor)] = cost_via_new_node
+                self.children[tuple(new_node)].append(neighbor)  # Add new parent relationship
 
-                # Debugging: Log rewiring information
                 if self.debug:
                     print(
                         f"Rewired node {neighbor} from parent {old_parent} to {new_node} "
                         f"with new cost {cost_via_new_node}"
-                    )
-
-                # Visualize the rewiring edge in PyBullet
-                if self.debug:
-                    p.addUserDebugLine(
-                        lineFromXYZ=new_node,
-                        lineToXYZ=neighbor,
-                        lineColorRGB=[0, 1, 0],  # Green for rewired edges
-                        lineWidth=2.0,
-                        lifeTime=1.0  # Temporary line for debugging
                     )
                 
     def propagate_cost_updates(self, node):
@@ -359,46 +358,68 @@ class RRT_STAR:
         if tuple(node) not in self.costs:
             raise ValueError(f"Node {node} is not in the tree or does not have a valid cost entry.")
 
-        # Initialize a queue for breadth-first traversal
+        # Use a queue for breadth-first traversal
         queue = [node]
 
-        # Traverse the tree and update costs
         while queue:
             current_node = queue.pop(0)
-
-            # Get the current node's children
-            children = [child for child, parent in self.parents.items() if tuple(parent) == tuple(current_node)]
+            children = self.children.get(tuple(current_node), [])
 
             for child in children:
-                # Calculate the new cost of the child
                 new_cost = self.costs[tuple(current_node)] + np.linalg.norm(
                     np.array(child) - np.array(current_node)
                 )
-
-                # Check if the cost needs to be updated
                 if abs(self.costs[tuple(child)] - new_cost) > 1e-6:
                     self.costs[tuple(child)] = new_cost
-
-                    # Debugging: Log the cost update
                     if self.debug:
                         print(f"Updated cost for node {child}: {new_cost}")
+                    queue.append(child)
+    
+    def add_node(self, new_node, parent_node):
+        """
+        Add a new node to the tree and update parent-child relationships.
 
-                    # Visualize cost propagation in PyBullet
-                    if self.debug:
-                        p.addUserDebugLine(
-                            lineFromXYZ=current_node,
-                            lineToXYZ=child,
-                            lineColorRGB=[1, 1, 0],  # Yellow for cost updates
-                            lineWidth=2.0,
-                            lifeTime=1.0  # Temporary visualization for debugging
-                        )
-
-                # Add the child to the queue for further traversal
-                queue.append(child)
+        Args:
+            new_node (np.array): The new node to add.
+            parent_node (np.array): The parent node of the new node.
+        """
+        self.tree.append(new_node)
+        self.parents[tuple(new_node)] = tuple(parent_node)
+        self.children[tuple(parent_node)].append(new_node)  # Update child relationships
 
     def children_of(self, node):
-        """Return the list of children of a given node."""
-        return self.children.get(tuple(node), [])
+        """
+        Find all children of the given node in the RRT* tree.
+
+        Why it's needed:
+            - Used in operations like cost propagation and rewiring.
+
+        Args:
+            node (np.array): The node whose children are to be found.
+
+        Returns:
+            list: A list of child nodes.
+        """
+        # Retrieve children from precomputed relationships
+        children = self.children.get(tuple(node), [])
+
+        if self.debug:
+            if children:
+                print(f"Children of node {node}: {children}")
+            else:
+                print(f"Node {node} has no children.")
+
+            # Visualize children relationships in PyBullet
+            for child in children:
+                p.addUserDebugLine(
+                    lineFromXYZ=node,
+                    lineToXYZ=child,
+                    lineColorRGB=[0, 1, 0],  # Green for child edges
+                    lineWidth=2.0,
+                    lifeTime=1.0  # Temporary visualization for debugging
+                )
+
+        return children
 
     def lowest_cost_neighbor(self, new_node):
         best_neighbor = []
