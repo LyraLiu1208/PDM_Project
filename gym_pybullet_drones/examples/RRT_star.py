@@ -62,13 +62,29 @@ class RRT_STAR:
             radius_const (float): Constant used to calculate neighbor search radius.
             edges (dict): Dictionary storing edges between nodes in the tree for connection tracking.
         """
+        # Validate start and goal positions
+        if len(start) != 3 or len(goal) != 3:
+            raise ValueError("Start and goal positions must be 3D points [x, y, z].")
+
+        # Validate bounds
+        if bounds.shape != (3, 2):
+            raise ValueError("Bounds must be a 3x2 array defining [min, max] for each axis (x, y, z).")
+        if not np.all(bounds[:, 0] <= bounds[:, 1]):
+            raise ValueError("Invalid bounds: min values must be less than or equal to max values.")
+
+        # Validate obstacles
+        for obs in obstacles:
+            if len(obs) != 2 or len(obs[0]) != 3 or len(obs[1]) != 3:
+                raise ValueError("Each obstacle must be a tuple (center, size), where both are 3D vectors.")
+    
+        # Initialize RRT* planner attributes
         self.start = np.array(start)
         self.goal = np.array(goal)
         self.obstacles = obstacles  # Obstacles are represented as (center, size) tuples
         self.bounds = bounds
         self.step_size = step_size
         self.max_iter = max_iter
-        
+
         self.tree = [self.start]
         self.path = []
         self.debug = debug
