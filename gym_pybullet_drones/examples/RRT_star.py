@@ -288,15 +288,62 @@ class RRT_STAR:
         return total_cost
 
     def rewire(self, new_node):
-        """ Rewires path to new node if better one exists"""
-        for neighbor in self.near(new_node):
-            if not self.edge_in_collision(neighbor, new_node):
-                new_cost = self.cost(new_node) + np.linalg.norm(new_node - neighbor)
-                if new_cost < self.cost(neighbor):
-                    self.alter_parent(neighbor, new_node)
-                    #self.parents[tuple(neighbor)] = new_node
-                    self.costs[tuple(neighbor)] = new_cost
-                    self.propagate_cost_updates(neighbor)
+        """
+        Rewire the tree by updating parent relationships for nodes near the new_node.
+
+        Args:
+            new_node (np.array): The recently added node to the tree.
+
+        """
+        # Calculate the rewiring radius
+        radius = self.radius_const * (np.log(len(self.tree)) / len(self.tree)) ** (1 / 3)
+
+        # Find neighbors using KDTree
+        if not self.node_kd_tree or len(self.tree) != self.node_kd_tree.n:
+            self.node_kd_tree = KDTree(self.tree)
+        neighbor_indices = self.node_kd_tree.query_ball_point(new_node, radius)
+        neighbors = [self.tree[idx] for idx in neighbor_indices]
+
+        # Iterate through neighbors and attempt rewiring
+        for neighbor in neighbors:
+            # Skip if neighbor is the new_node itself
+            if np.array_equal(neighbor, new_node):
+                continue
+
+            # Check if the edge between new_node and neighbor is collision-free
+            if self.edge_in_collision(new_node, neighbor):
+                if self.debug:
+                    print(f"Skipping rewiring for neighbor {neighbor}: edge collision detected.")
+                continue
+
+            # Calculate the cost of reaching the neighbor through the new_node
+            cost_via_new_node = (
+                self.costs[tuple(new_node)] + np.linalg.norm(np.array(neighbor) - np.array(new_node))
+            )
+
+            # Check if rewiring reduces the cost
+            if cost_via_new_node < self.costs[tuple(neighbor)]:
+                # Update the parent and cost of the neighbor
+                old_parent = self.parents[tuple(neighbor)]
+                self.parents[tuple(neighbor)] = tuple(new_node)
+                self.costs[tuple(neighbor)] = cost_via_new_node
+
+                # Debugging: Log rewiring information
+                if self.debug:
+                    print(
+                        f"Rewired node {neighbor} from parent {old_parent} to {new_node} "
+                        f"with new cost {cost_via_new_node}"
+                    )
+
+                # Visualize the rewiring edge in PyBullet
+                if self.debug:
+                    p.addUserDebugLine(
+                        lineFromXYZ=new_node,
+                        lineToXYZ=neighbor,
+                        lineColorRGB=[0, 1, 0],  # Green for rewired edges
+                        lineWidth=2.0,
+                        lifeTime=1.0  # Temporary line for debugging
+                    )
                 
     def propagate_cost_updates(self, node):
         for child in self.children_of(node):
