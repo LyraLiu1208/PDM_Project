@@ -1,13 +1,9 @@
-import os
 import time
 import argparse
-from datetime import datetime
-import pdb
-import math
-import random
 import numpy as np
 import pybullet as p
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from collections import defaultdict
 from scipy.spatial import KDTree
 
@@ -256,10 +252,40 @@ class RRT_STAR:
         return [self.tree[idx] for idx in indices]
 
     def cost(self, node):
-        """Return the cost of reaching a node from start"""
-        return self.costs.get(tuple(node), float('inf'))
-    
+        """
+        Compute the cost of reaching a node from the start.
 
+        Why it's needed:
+            - Determines the total path cost to a node, which is critical for path optimization and rewiring.
+
+        Args:
+            node (np.array): The node for which the cost is calculated.
+
+        Returns:
+            float: The total cost to reach the node from the start.
+
+        Raises:
+            ValueError: If the node is not in the tree or does not have a valid parent.
+        """
+        if tuple(node) not in self.costs:
+            raise ValueError(f"Node {node} is not in the tree or does not have a valid cost entry.")
+
+        total_cost = 0.0
+        current_node = node
+
+        # Traverse the parent chain to sum up costs
+        while current_node is not None:
+            parent_node = self.parents.get(tuple(current_node))
+            if parent_node is None:  # Start node reached
+                break
+            edge_cost = np.linalg.norm(np.array(current_node) - np.array(parent_node))
+            total_cost += edge_cost
+            current_node = parent_node
+
+        if self.debug:
+            print(f"Total cost to reach node {node}: {total_cost}")
+
+        return total_cost
 
     def rewire(self, new_node):
         """ Rewires path to new node if better one exists"""
@@ -305,7 +331,6 @@ class RRT_STAR:
         else:
             return best_neighbor
 
-
     def edge_in_collision(self, from_node, to_node):
         direction = to_node - from_node
         nr = 50
@@ -314,7 +339,6 @@ class RRT_STAR:
             if self.is_in_collision(sample):
                 return True
         return False
-
 
     def alter_parent(self, node, new_parent):
         # if self.parents.get(tuple(node)) is None:
@@ -353,135 +377,176 @@ class RRT_STAR:
         if new_parent_tuple not in self.children:
             self.children[new_parent_tuple] = []
         self.children[new_parent_tuple].append(node)
-                
+    
+    def visualize_tree_bullet(self):
+        """
+        Visualize the branching structure of the RRT* tree in the Bullet physics example browser.
+
+        Draws the entire tree at the end of the planning process.
+        """
+        # Draw all nodes as small blue spheres
+        for node in self.tree:
+            p.addUserDebugText(
+                text="o",  # Render a small sphere (symbolic with 'o')
+                textPosition=node,
+                textColorRGB=[0, 0, 1],  # Blue for nodes
+                textSize=1.2,
+                lifeTime=0  # Persist until explicitly removed
+            )
+
+        # Draw edges (branches) connecting nodes to their parents
+        for node in self.tree:
+            parent = self.parents.get(tuple(node))
+            if parent is not None:
+                p.addUserDebugLine(
+                    lineFromXYZ=parent,
+                    lineToXYZ=node,
+                    lineColorRGB=[0.6, 0.6, 0.6],  # Gray for edges
+                    lineWidth=3.0,  # Thicker lines for better visibility
+                    lifeTime=0  # Persist until explicitly removed
+                )
+
+        # Highlight start and goal nodes
+        p.addUserDebugText(
+            text="START",
+            textPosition=self.start,
+            textColorRGB=[0, 1, 0],  # Green for start
+            textSize=1.5,
+            lifeTime=0
+        )
+        p.addUserDebugText(
+            text="GOAL",
+            textPosition=self.goal,
+            textColorRGB=[1, 0, 0],  # Red for goal
+            textSize=1.5,
+            lifeTime=0
+        )
+
+    def visualize_path_bullet(self, path):
+        """
+        Visualize the optimal path in the Bullet physics example browser.
+
+        Args:
+            path (list): List of nodes forming the optimal path.
+        """
+        for i in range(len(path) - 1):
+            p.addUserDebugLine(
+                lineFromXYZ=path[i],
+                lineToXYZ=path[i + 1],
+                lineColorRGB=[1, 0.5, 0],  # Orange for optimal path
+                lineWidth=5.0,  # Thicker lines for the path
+                lifeTime=0  # Persist until explicitly removed
+            )
 
     def plan(self):
-        """Plan a path using RRT."""
-        best_path = None
-        best_cost = float('inf')
-        self.costs[tuple(self.goal)] = float('inf')
-        i = 0
-        b = 0
-        N = 2
-        goal_reached = False
-        while i < self.max_iter or not best_path:
-            i = i + 1
-            #print(f"i = {i}, N = {N}")
-            
-            # if i%100 == 0:
-            #     p.removeAllUserDebugItems()
-            #     for debugnode in self.tree:
-            #         if np.any(self.parents[tuple(debugnode)] != None):
-            #             p.addUserDebugLine(self.start, self.start + [0, 0, 0.05], [1, 0, 1], 10)
-            #             p.addUserDebugLine(self.goal, self.goal + [0, 0, 0.05], [0, 1, 0], 10)
-            #             p.addUserDebugLine(debugnode, self.parents[tuple(debugnode)], [1, 0, 0], 3)
-            #     while True:
-            #         user_input = input("continue??? y")
-            #         if user_input.lower() == "y":
-            #             break
+        """
+        Plan a path from the start to the goal using the RRT* algorithm.
+        """
+        self.debug_items = []  # Initialize the list to track debug items
 
+        for iteration in range(self.max_iter):
+            random_point = self.get_random_point()
+            nearest_node = self.nearest_neighbor(random_point)
+            new_node = self.steer(nearest_node, random_point)
 
-            self.radius = self.radius_const*(np.log(N)/N)**(1/3)
-            rand_point = self.get_random_point()        #Returns randiom collision free point (collision check is done inside the function call)
-            best_neigbor = self.lowest_cost_neighbor(rand_point) #Return closest neighbour point for rand_point
-            #new_point = self.steer(nearest, rand_point)
-            new_point = rand_point
-            #p.addUserDebugText(".", new_point, textColorRGB=[0, 1, 0], textSize=2)
-            
-            if best_neigbor is not None:
-                
-                N = N + 1
-                #print(f"\n\n radius is: {self.radius} m \n\n")
-                self.tree.append(new_point)
-                #self.parents[tuple(new_point)] = best_neigbor
-                self.alter_parent(new_point, best_neigbor)
-                self.costs[tuple(new_point)] = self.cost(best_neigbor) + np.linalg.norm(best_neigbor - new_point)
-                self.rewire(new_point)
+            if not self.is_in_collision(new_node):
+                self.tree.append(new_node)
+                self.parents[tuple(new_node)] = tuple(nearest_node)
+                self.costs[tuple(new_node)] = self.costs[tuple(nearest_node)] + np.linalg.norm(
+                    np.array(new_node) - np.array(nearest_node)
+                )
 
-                #self.costs[tuple(self.goal)] = 0
-                if goal_reached:
-                    path = [self.goal]
-                    while path[-1] is not None:
-                        path.append(self.parents[tuple(path[-1])])
-                    path = path[::-1][2:]
-                
-                    for node in path:
-                        self.costs[tuple(node)] = self.costs[tuple(self.parents[tuple(node)])] + np.linalg.norm(node - self.parents[tuple(node)])
-                
-                
-                if not self.edge_in_collision(new_point, self.goal): # and best_cost > 1000:
-                    if self.cost(new_point) + np.linalg.norm(new_point - self.goal) < self.costs[tuple(self.goal)]:
-                        goal_reached = True
-                        #self.tree.append(self.goal)
-                        #self.parents[tuple(self.goal)] = new_point
-                        self.alter_parent(self.goal, new_point)
-                        self.costs[tuple(self.goal)] = self.cost(new_point) + np.linalg.norm(new_point - self.goal)
+                # Optional rewiring logic
+                self.rewire(new_node)
 
-                
-                if self.cost(self.goal) < best_cost:
-                    best_cost = self.cost(self.goal)
-                    best_path = self.construct_path(b)
-                    b = b+1
-            #else:
-                #print("No neighbour possible \n")
-            # Print progress at every 100 iterations
-            if i % 50 == 0:
-                print(f"\n\n\n\n Iteration {i}: Tree size = {len(self.tree)} \n\n\n\n")
+                # Check if the goal is reached
+                if np.linalg.norm(np.array(new_node) - np.array(self.goal)) < self.step_size:
+                    self.parents[tuple(self.goal)] = tuple(new_node)
+                    self.costs[tuple(self.goal)] = self.costs[tuple(new_node)] + np.linalg.norm(
+                        np.array(self.goal) - np.array(new_node)
+                    )
+                    break
 
-        if best_path:
-            #time.sleep(10)
-            return best_path
+        # Visualize the entire tree after planning
+        self.visualize_tree_bullet()
+
+        # Final visualization with the optimal path
+        if tuple(self.goal) in self.parents:
+            # Remove all tree-related debug items
+            for debug_id in self.debug_items:
+                p.removeUserDebugItem(debug_id)
+
+            # Visualize only the optimal path
+            path = self.construct_path(self.goal)
+            self.visualize_path_bullet(path)
+            return path
         else:
-            print("Failed to find a path!")
-            return []
+            raise RuntimeError("Failed to find a path to the goal.")
 
+    def construct_path(self, node):
+        """
+        Construct the path from the goal node to the start node.
 
+        Args:
+            node (np.array): The goal node.
 
-    def construct_path(self, b):
-        """Construct the path from goal to start."""
-        path = [self.goal]
-        if b > 6:
-            b = 6
-        while path[-1] is not None:
-            path.append(self.parents[tuple(path[-1])])
+        Returns:
+            list: A list of nodes forming the path from start to goal.
 
-        if path is not None:
-            for j in range(len(path) - 2):
-                if b > 3:
-                    p.addUserDebugLine(path[j], path[j + 1], [1, 0.33*(b-3), 1], 5)
-                else:
-                    p.addUserDebugLine(path[j], path[j + 1], [0.33*b, 0, 1], 5)
-        return path[::-1][1:]
+        Raises:
+            KeyError: If a node does not have a valid parent.
+        """
+        path = [node]
 
+        while tuple(path[-1]) in self.parents:
+            parent = self.parents[tuple(path[-1])]
+            if parent is None:
+                break
+            path.append(parent)
 
-    def create_ref_from_path(self, path):
-            sample_distance = 0.05
-            ref_path = []
-            for i in range(len(path)-1):
-                segment_direction = path[i+1] - path[i]
-                segment_length = np.linalg.norm(segment_direction)
+        # Reverse the path to start from the start node
+        path.reverse()
 
-                steps = round(segment_length/sample_distance)
-                ref_path.append(path[i])
-                for step in range(steps-1):
-                    ref_path.append(path[i]+step/steps*segment_direction)
-            return ref_path
+        # Debugging output for path validation
+        if self.debug:
+            print(f"Constructed path: {path}")
 
-        # path = [self.goal]
-        # while True:
-        #     for i, item in enumerate(self.tree):
-        #         if np.array_equal(item, path[-1]):
-        #             del self.tree[i]
-        #             break
-        #     nearest = self.nearest_neighbor(path[-1])
-        #     if np.linalg.norm(nearest - self.start) < 1e-2:
-        #         path.append(self.start)
-        #         break
-        #     path.append(nearest)
-        # if self.debug:
-        #     print(f"Constructed path: {path}")
-        # return path[::-1]
+        return path
 
+    def create_ref_from_path(self, path, sample_distance=0.1):
+        """
+        Create a smooth reference path by interpolating along the given path.
+
+        Args:
+            path (list): A list of nodes forming the path (as tuples or arrays).
+            sample_distance (float): The distance between interpolated points.
+
+        Returns:
+            list: A list of interpolated points forming a smooth path.
+        """
+        reference_path = []
+
+        # Ensure path is a list of numpy arrays
+        path = [np.array(p) for p in path]
+
+        # Iterate through segments in the path
+        for i in range(len(path) - 1):
+            segment_direction = path[i + 1] - path[i]
+            segment_length = np.linalg.norm(segment_direction)
+
+            # Normalize the direction vector
+            unit_direction = segment_direction / segment_length
+
+            # Interpolate points along the segment
+            num_samples = int(segment_length / sample_distance)
+            for j in range(num_samples):
+                reference_point = path[i] + j * sample_distance * unit_direction
+                reference_path.append(reference_point)
+
+        # Add the final point to ensure the path ends at the goal
+        reference_path.append(path[-1])
+
+        return reference_path
 
 def run(
         drone=DEFAULT_DRONES,
