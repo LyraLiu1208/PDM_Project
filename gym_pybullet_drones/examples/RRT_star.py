@@ -3,11 +3,9 @@ import argparse
 import numpy as np
 import pybullet as p
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 from collections import defaultdict
 from scipy.spatial import KDTree
-import random
-from metrics import Metrics 
+from metrics import Metrics
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
@@ -799,7 +797,7 @@ def run(
     }]
 
     # Save metrics to a YAML file
-    rrt_star.metrics.save_to_yaml(folder="metrics", trial_results=trial_results)
+    rrt_star.metrics.save_to_yaml(folder="metrics/WareHouse/RRT_star", trial_results=trial_results)
     print("Metrics saved successfully.")
 
     p.removeAllUserDebugItems()
