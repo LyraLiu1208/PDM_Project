@@ -7,6 +7,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from collections import defaultdict
 from scipy.spatial import KDTree
 import random
+from metrics import Metrics 
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
@@ -103,6 +104,8 @@ class RRT_STAR:
         self.children = defaultdict(list)  # Tracks children of each node
         self.radius_const = 3  # Used for neighbor search radius
         self.edges = {}  # Dictionary to store edges between nodes
+
+        self.metrics = Metrics()  # Initialize Metrics class for performance evaluation
 
     def is_in_collision(self, point):
         """
@@ -614,6 +617,7 @@ class RRT_STAR:
             list: A list of nodes forming the optimal path from start to goal.
         """
         self.debug_items = []  # Initialize debug visualization items for PyBullet
+        start_time = time.time()  # Start timing
 
         for iteration in range(self.max_iter):
             # Sample a random point in the configuration space
@@ -643,6 +647,8 @@ class RRT_STAR:
                     self.add_node(self.goal, new_node)
                     break
 
+        end_time = time.time()  # End timing
+
         # Final visualization of the tree and optimal path
         if tuple(self.goal) in self.parents:
             # Visualize the entire tree only once the optimal path is found
@@ -651,6 +657,16 @@ class RRT_STAR:
             # Construct and visualize the optimal path
             path = self.construct_path(self.goal)
             self.visualize_path_bullet(path)
+
+            # Compute and log metrics
+            self.metrics.compute_computation_time(start_time, end_time)
+            self.metrics.compute_path_length(path)
+            self.metrics.compute_smoothness(path)
+
+            print(f"Path length: {self.metrics.data['path_length']}")
+            print(f"Computation time: {self.metrics.data['computation_time']} seconds")
+            print(f"Path smoothness: {self.metrics.data['smoothness']}")
+
             return path
         else:
             raise RuntimeError("Failed to find a path to the goal.")
@@ -708,79 +724,6 @@ class RRT_STAR:
         reference_path.append(path[-1])
 
         return reference_path
-
-    def generate_random_point(bounds, obstacles):
-        """
-        Generate a random point within the bounds and not within any obstacle.
-
-        Args:
-            bounds (np.array): Array defining the bounds [[min_x, max_x], [min_y, max_y], [min_z, max_z]].
-            obstacles (list): List of obstacles, each defined as a tuple (center, size).
-
-        Returns:
-            np.array: A random point within the bounds and free of obstacles.
-        """
-        while True:
-            # Generate a random point within the bounds
-            point = np.array([
-                random.uniform(bounds[0][0], bounds[0][1]),  # X-axis
-                random.uniform(bounds[1][0], bounds[1][1]),  # Y-axis
-                random.uniform(bounds[2][0], bounds[2][1])   # Z-axis
-            ])
-
-            # Check if the point is in free space
-            collision = False
-            for center, size in obstacles:
-                half_size = np.array(size) / 2.0
-                lower_bound = np.array(center) - half_size
-                upper_bound = np.array(center) + half_size
-
-                if np.all(lower_bound <= point) and np.all(point <= upper_bound):
-                    collision = True
-                    break
-
-            if not collision:
-                return point
-
-def generate_random_point(bounds, obstacles):
-    """
-    Generate a random point within the bounds and not within any obstacle.
-
-    Args:
-        bounds (np.array): Array defining the bounds [[min_x, max_x], [min_y, max_y], [min_z, max_z]].
-        obstacles (list): List of obstacles, each defined as a tuple (center, size).
-
-    Returns:
-        np.array: A random point within the bounds and free of obstacles.
-
-    Raises:
-        ValueError: If obstacles is not a valid list of (center, size) pairs.
-    """
-    # Validate obstacles
-    if not isinstance(obstacles, list):
-        raise ValueError(f"Expected obstacles to be a list, but got {type(obstacles)}: {obstacles}")
-
-    while True:
-        # Generate a random point within the bounds
-        point = np.array([
-            random.uniform(bounds[0][0], bounds[0][1]),  # X-axis
-            random.uniform(bounds[1][0], bounds[1][1]),  # Y-axis
-            random.uniform(bounds[2][0], bounds[2][1])   # Z-axis
-        ])
-
-        # Check if the point is in free space
-        collision = False
-        for center, size in obstacles:
-            half_size = np.array(size) / 2.0
-            lower_bound = np.array(center) - half_size
-            upper_bound = np.array(center) + half_size
-
-            if np.all(lower_bound <= point) and np.all(point <= upper_bound):
-                collision = True
-                break
-
-        if not collision:
-            return point
 
 def run(
         drone=DEFAULT_DRONES,
@@ -846,6 +789,19 @@ def run(
     rrt_star = RRT_STAR(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=1000, debug=True)
     path = rrt_star.plan()
     reference_path = rrt_star.create_ref_from_path(path)
+
+    # Collect metrics for this trial
+    trial_results = [{
+        "trial": 1,
+        "path_length": rrt_star.metrics.data.get("path_length", 0),
+        "smoothness": rrt_star.metrics.data.get("smoothness", 0),
+        "computation_time": rrt_star.metrics.data.get("computation_time", 0)
+    }]
+
+    # Save metrics to a YAML file
+    rrt_star.metrics.save_to_yaml(folder="metrics", trial_results=trial_results)
+    print("Metrics saved successfully.")
+
     p.removeAllUserDebugItems()
     if path is not None:
         for j in range(len(path) - 1):
