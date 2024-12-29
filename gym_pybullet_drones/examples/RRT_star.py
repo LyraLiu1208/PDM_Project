@@ -87,7 +87,7 @@ class RRT_STAR:
 
         self.tree = [np.array(start)]
         self.path = []
-        self.debug = True
+        self.debug = debug
         self.obstacle_ids = obstacle_ids
         
         # Initialize KDTree for obstacle centers for efficient nearest neighbor queries
@@ -495,12 +495,38 @@ class RRT_STAR:
         return best_neighbor
 
     def edge_in_collision(self, from_node, to_node):
+        """
+        Check if an edge between two nodes is in collision with any obstacle.
+
+        Args:
+            from_node (tuple or np.array): Start node of the edge.
+            to_node (tuple or np.array): End node of the edge.
+
+        Returns:
+            bool: True if the edge is in collision, False otherwise.
+        """
+        # Ensure inputs are numpy arrays
+        from_node = np.array(from_node)
+        to_node = np.array(to_node)
+
+        # Calculate the direction and distance between nodes
         direction = to_node - from_node
-        nr = 50
-        for i in range(1,nr-1):
-            sample = from_node + 1/nr*(i)*direction
-            if self.is_in_collision(sample):
+        distance = np.linalg.norm(direction)
+
+        # Dynamically determine the number of steps for collision checks
+        steps = max(1, int(distance / self.step_size))
+        step_vector = direction / steps
+
+        # Iterate through intermediate points along the edge
+        for step in range(1, steps + 1):
+            intermediate_point = from_node + step * step_vector
+
+            # Check if the intermediate point is in collision
+            if self.is_in_collision(intermediate_point):
+                if self.debug:
+                    print(f"Collision detected on edge: {from_node} -> {to_node}, at {intermediate_point}")
                 return True
+
         return False
 
     def alter_parent(self, node, new_parent):
@@ -606,6 +632,51 @@ class RRT_STAR:
                 lineWidth=5.0,  # Thicker lines for the path
                 lifeTime=0  # Persist until explicitly removed
             )
+    
+    def smooth_path(self, path, max_segment_length=1.0):
+        """
+        Smooth the path by iteratively removing unnecessary waypoints while ensuring collision-free segments.
+
+        Args:
+            path (list): The original path as a list of nodes (tuples or arrays).
+            max_segment_length (float): Maximum allowable segment length after smoothing.
+
+        Returns:
+            list: A smoothed path with reduced waypoints.
+        """
+        if len(path) <= 2:
+            return path  # Path is already smooth
+
+        # Ensure all points in the path are numpy arrays
+        path = [np.array(p) for p in path]
+
+        smoothed_path = [path[0]]  # Always include the start point
+        i = 0
+
+        while i < len(path) - 1:
+            # Find the furthest node that can form a collision-free segment with the current node
+            for j in range(len(path) - 1, i, -1):
+                if not self.edge_in_collision(path[i], path[j]):
+                    segment_length = np.linalg.norm(path[i] - path[j])
+                    if segment_length <= max_segment_length:
+                        smoothed_path.append(path[j])
+                        i = j
+                        break
+            else:
+                # If no valid segment is found, move to the next point
+                smoothed_path.append(path[i + 1])
+                i += 1
+
+        # Ensure the goal point is included
+        if not np.array_equal(smoothed_path[-1], path[-1]):
+            smoothed_path.append(path[-1])
+
+        # Debugging: Log the smoothed path
+        if self.debug:
+            print(f"Original path: {path}")
+            print(f"Smoothed path: {smoothed_path}")
+
+        return smoothed_path
 
     def plan(self):
         """
@@ -649,11 +720,13 @@ class RRT_STAR:
 
         # Final visualization of the tree and optimal path
         if tuple(self.goal) in self.parents:
-            # Visualize the entire tree only once the optimal path is found
-            self.visualize_tree_bullet()
+            if self.debug:
+                # Visualize the entire tree only once the optimal path is found
+                self.visualize_tree_bullet()
 
             # Construct and visualize the optimal path
             path = self.construct_path(self.goal)
+            path = self.smooth_path(path)  # Apply path smoothing
             self.visualize_path_bullet(path)
 
             # Compute and log metrics
@@ -784,7 +857,7 @@ def run(
 
     obstacle_ids = []
     # Plan path using RRT
-    rrt_star = RRT_STAR(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=1000, debug=True)
+    rrt_star = RRT_STAR(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=1000, debug=False)
     path = rrt_star.plan()
     reference_path = rrt_star.create_ref_from_path(path)
 
