@@ -81,16 +81,16 @@ class Metrics:
 
         # Calculate averages
         total_path_length = sum(trial.get("path_length", 0) for trial in trial_results if trial.get("path_length") is not None)
-        total_smoothness = sum(trial.get("smoothness", 0) for trial in trial_results if trial.get("smoothness") is not None)
+        total_smoothness = sum(trial.get("path_smoothness", 0) for trial in trial_results if trial.get("smoothness") is not None)
         total_computation_time = sum(trial.get("computation_time", 0) for trial in trial_results)
         total_iterations = sum(trial.get("num_iterations", 0) for trial in trial_results)
 
         num_trials_with_path = len([trial for trial in trial_results if trial.get("path_length") is not None])
 
-        avg_path_length = total_path_length / num_trials_with_path if num_trials_with_path > 0 else 0.0
-        avg_smoothness = total_smoothness / num_trials_with_path if num_trials_with_path > 0 else 0.0
+        avg_path_length = total_path_length / num_trials_with_path 
+        avg_smoothness = total_smoothness / num_trials_with_path 
         avg_computation_time = total_computation_time / len(trial_results)
-        avg_iteration_time = total_computation_time / total_iterations if total_iterations > 0 else 0.0
+        avg_iteration_time = total_computation_time / total_iterations 
         avg_num_iterations = total_iterations / len(trial_results)
 
         # Prepare averages section
@@ -99,18 +99,17 @@ class Metrics:
             "avg_smoothness": round(float(avg_smoothness), 2),
             "avg_computation_time": round(float(avg_computation_time), 2),
             "avg_iteration_time": round(float(avg_iteration_time), 2),
-            "avg_num_iterations": round(float(avg_num_iterations), 2)
+            "avg_num_iterations": round(float(avg_num_iterations), 2),
+            "num_trials": len(trial_results)
         }
-
-        self.data["num_trials"] = len(trial_results)
 
         # Prepare data for each trial
         self.data["trials"] = {}
         for trial in trial_results:
             trial_number = trial["trial"]
             self.data["trials"][f"Trial {trial_number}"] = {
-                "path_length": round(float(trial["path_length"]), 2) if trial.get("path_length") else None,
-                "smoothness": round(float(trial["smoothness"]), 2) if trial.get("smoothness") else None,
+                "path_length": round(float(trial["path_length"]), 2),
+                "path_smoothness": round(float(trial["path_smoothness"]), 2),
                 "computation_time": round(float(trial["computation_time"]), 2),
                 "num_iterations": trial["num_iterations"],
                 "avg_iteration_time": round(float(trial["avg_iteration_time"]), 2),

@@ -302,7 +302,7 @@ def run(
 
     # Log results
     metrics_logger = Metrics()
-    metrics_logger.save_to_yaml(num_trials=num_trials, folder="metrics/WareHouse/RRT", trial_results=trial_results)
+    metrics_logger.save_to_yaml(folder="metrics/WareHouse/RRT", trial_results=trial_results)
 
     print("\nAll trials completed. Results saved to YAML.")
 
