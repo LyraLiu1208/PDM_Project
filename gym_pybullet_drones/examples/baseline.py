@@ -29,7 +29,7 @@ DEFAULT_CONTROL_FREQ_HZ = 48
 DEFAULT_DURATION_SEC = 12
 DEFAULT_OUTPUT_FOLDER = 'results'
 DEFAULT_COLAB = False
-NUM_TRIALS = 10
+NUM_TRIALS = 1
 debug = False
 include_static=True
 include_dynamic=False
@@ -181,7 +181,7 @@ class RRT:
         return path[::-1]
 
 def run(
-        num_trials=NUM_TRIALS,
+        trials=NUM_TRIALS,
         drone=DEFAULT_DRONES,
         num_drones=DEFAULT_NUM_DRONES,
         physics=DEFAULT_PHYSICS,
@@ -202,7 +202,7 @@ def run(
     """
     trial_results = []  # Store results for all trials
 
-    for trial in range(1, num_trials + 1):
+    for trial in range(1, trials + 1):
         print(f"\n=== Trial {trial} ===")
 
         # Define start and goal points for the trial
@@ -302,12 +302,13 @@ def run(
 
     # Log results
     metrics_logger = Metrics()
-    metrics_logger.save_to_yaml(folder="metrics/WareHouse/RRT", trial_results=trial_results)
+    metrics_logger.save_to_yaml(folder="./metrics/WareHouse/RRT", trial_results=trial_results)
 
     print("\nAll trials completed. Results saved to YAML.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Helix flight script using CtrlAviary and DSLPIDControl')
+    parser.add_argument('--trials', default=NUM_TRIALS, type=int, help='Number of trials', metavar='')
     parser.add_argument('--drone',              default=DEFAULT_DRONES,     type=DroneModel,    help='Drone model (default: CF2X)', metavar='', choices=DroneModel)
     parser.add_argument('--num_drones',         default=DEFAULT_NUM_DRONES,          type=int,           help='Number of drones (default: 3)', metavar='')
     parser.add_argument('--physics',            default=DEFAULT_PHYSICS,      type=Physics,       help='Physics updates (default: PYB)', metavar='', choices=Physics)
@@ -321,6 +322,7 @@ if __name__ == "__main__":
     parser.add_argument('--duration_sec',       default=DEFAULT_DURATION_SEC,         type=int,           help='Duration of the simulation in seconds (default: 5)', metavar='')
     parser.add_argument('--output_folder',     default=DEFAULT_OUTPUT_FOLDER, type=str,           help='Folder where to save logs (default: "results")', metavar='')
     parser.add_argument('--colab',              default=DEFAULT_COLAB, type=bool,           help='Whether example is being run by a notebook (default: "False")', metavar='')
+
     ARGS = parser.parse_args()
 
     run(**vars(ARGS))

@@ -17,7 +17,7 @@ from gym_pybullet_drones.utils.Logger import Logger
 from gym_pybullet_drones.utils.utils import sync, str2bool
 from gym_pybullet_drones.envs.WareHouse import WarehouseEnvironment
 
-NUM_TRIALS = 10
+NUM_TRIALS = 1
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
@@ -354,7 +354,7 @@ class RRT_STAR:
 
 
 def run(
-        num_trials=NUM_TRIALS,
+        trials=NUM_TRIALS,
         drone=DEFAULT_DRONES,
         num_drones=DEFAULT_NUM_DRONES,
         physics=DEFAULT_PHYSICS,
@@ -372,7 +372,7 @@ def run(
         ):
     
     trial_results = []  # Store results for all trials
-    for trial in range(1, num_trials + 1):
+    for trial in range(1, trials + 1):
         print(f"\n=== Trial {trial} ===")
         #### Initialize the simulation #############################
         # Define start and goal points based on the warehouse layout
@@ -528,13 +528,14 @@ def run(
     
     # Log results
     metrics_logger = Metrics()
-    metrics_logger.save_to_yaml(num_trials=num_trials, folder="metrics/WareHouse/RRT_STAR", trial_results=trial_results)
+    metrics_logger.save_to_yaml(folder="./metrics/WareHouse/RRT_STAR", trial_results=trial_results)
 
     print("\nAll trials completed. Results saved to YAML.")
 
 if __name__ == "__main__":
     #### Define and parse (optional) arguments for the script ##
     parser = argparse.ArgumentParser(description='Helix flight script using CtrlAviary and DSLPIDControl')
+    parser.add_argument('--trials', default=NUM_TRIALS, type=int, help='Number of trials', metavar='')
     parser.add_argument('--drone',              default=DEFAULT_DRONES,     type=DroneModel,    help='Drone model (default: CF2X)', metavar='', choices=DroneModel)
     parser.add_argument('--num_drones',         default=DEFAULT_NUM_DRONES,          type=int,           help='Number of drones (default: 3)', metavar='')
     parser.add_argument('--physics',            default=DEFAULT_PHYSICS,      type=Physics,       help='Physics updates (default: PYB)', metavar='', choices=Physics)
