@@ -8,6 +8,7 @@ import random
 import numpy as np
 import pybullet as p
 import matplotlib.pyplot as plt
+from metrics import Metrics
 
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
 from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
@@ -16,6 +17,7 @@ from gym_pybullet_drones.utils.utils import sync, str2bool
 from gym_pybullet_drones.envs.CollapsedBuilding import CollapsedBuildingEnvironment
 from collections import defaultdict
 
+NUM_TRIALS = 1
 DEFAULT_DRONES = DroneModel("cf2x")
 DEFAULT_NUM_DRONES = 1
 DEFAULT_PHYSICS = Physics("pyb")
@@ -50,8 +52,8 @@ class RRT_STAR:
         self.debug = debug
         self.obstacle_ids = obstacle_ids
         self.children = defaultdict(list)
-
-
+        self.num_iterations = 0
+        self.metrics_logger = Metrics()
 
     def is_in_collision(self, point):
         """Check if a point collides with any obstacle."""
@@ -230,6 +232,7 @@ class RRT_STAR:
         b = 0
         N = 2
         goal_reached = False
+        start_time = time.time()  # Record start time
         while i < self.max_iter or not best_path:
             i = i + 1
             #print(f"i = {i}, N = {N}")
@@ -246,7 +249,7 @@ class RRT_STAR:
             #         if user_input.lower() == "y":
             #             break
 
-
+            self.num_iterations += 1
             self.radius = self.radius_const*(np.log(N)/N)**(1/3)
             rand_point = self.get_random_point()        #Returns randiom collision free point (collision check is done inside the function call)
             best_neigbor = self.lowest_cost_neighbor(rand_point) #Return closest neighbour point for rand_point
@@ -294,14 +297,21 @@ class RRT_STAR:
             if i % 50 == 0:
                 print(f"\n\n\n\n Iteration {i}: Tree size = {len(self.tree)} \n\n\n\n")
 
-        if best_path:
-            #time.sleep(10)
-            return best_path
-        else:
-            print("Failed to find a path!")
-            return []
+        end_time = time.time()  # Record end time
+        computation_time = end_time - start_time
+        path_length = self.metrics_logger.compute_path_length(best_path) if len(best_path) > 0 else None
+        path_smoothness = self.metrics_logger.compute_smoothness(best_path) if len(best_path) > 0 else None
 
-
+        # Store metrics
+        metrics = {
+            "path_found": len(best_path) > 0,
+            "num_iterations": self.num_iterations,
+            "computation_time": computation_time,
+            "avg_iteration_time": computation_time / self.num_iterations if self.num_iterations > 0 else 0,
+            "path_length": path_length,
+            "path_smoothness": path_smoothness
+        }
+        return best_path, metrics
 
     def construct_path(self, b):
         """Construct the path from goal to start."""
@@ -350,6 +360,7 @@ class RRT_STAR:
 
 
 def run(
+        trials=NUM_TRIALS,
         drone=DEFAULT_DRONES,
         num_drones=DEFAULT_NUM_DRONES,
         physics=DEFAULT_PHYSICS,
@@ -365,135 +376,170 @@ def run(
         colab=DEFAULT_COLAB,
         debug = debug
         ):
-    #### Initialize the simulation #############################
-    # Define start and goal points based on the warehouse layout
-    start = np.array([0, -1.0, 0.5])  # Start near the bottom-left corner of the first aisle
-    goal = np.array([0, 6.5, 0.5])   # Goal near the top-right corner of the second aisle
-
-    # Define bounds for the warehouse environment
-    bounds = np.array([
-        [-2, 2],  # X-axis bounds (covering all aisles)
-        [-1.5, 8],  # Y-axis bounds
-        [0.1, 1.5]    # Z-axis bounds
-    ])
-
-    H = .1
-    H_STEP = .05
-    R = .3
-    # INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
-    INIT_XYZS = np.array([start])
-    INIT_RPYS = np.array([[0, 0,  0] for i in range(num_drones)])
-
-
-    env = CollapsedBuildingEnvironment(drone_model=DEFAULT_DRONES,
-                                num_drones=DEFAULT_NUM_DRONES,
-                                initial_xyzs=INIT_XYZS,
-                                initial_rpys=INIT_RPYS,
-                                physics=DEFAULT_PHYSICS,
-                                neighbourhood_radius=10,
-                                pyb_freq=DEFAULT_SIMULATION_FREQ_HZ,
-                                ctrl_freq=DEFAULT_CONTROL_FREQ_HZ,
-                                gui=DEFAULT_GUI,
-                                record=False,
-                                obstacles=False
-                                 )
     
-    #### Obtain the PyBullet Client ID from the environment ####
-    PYB_CLIENT = env.getPyBulletClient()
+    trial_results = []  # Store results for all trials
+    for trial in range(1, trials + 1):
+        print(f"\n=== Trial {trial} ===")
+        #### Initialize the simulation #############################
+        # Define start and goal points based on the warehouse layout
+        start = np.array([0, -1.0, 0.5])  # Start near the bottom-left corner of the first aisle
+        goal = np.array([0, 6.5, 0.5])   # Goal near the top-right corner of the second aisle
 
-    #### Begin RRT(*) algorithm here ####
+        # Define bounds for the warehouse environment
+        bounds = np.array([
+            [-2, 2],  # X-axis bounds (covering all aisles)
+            [-1.5, 8],  # Y-axis bounds
+            [0.1, 1.5]    # Z-axis bounds
+        ])
 
-    # Get obstacles from the environment
-    obstacles = env.get_obstacles()
-    obstacle_ids = []
-    # Plan path using RRT
-    rrt_star = RRT_STAR(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=1000, debug=True)
-    path = rrt_star.plan()
-    reference_path = rrt_star.create_ref_from_path(path)
-    p.removeAllUserDebugItems()
-    if path is not None:
-        for j in range(len(path) - 1):
-                p.addUserDebugLine(path[j], path[j + 1], [0, 0.6, 0], 2)
+        H = .1
+        H_STEP = .05
+        R = .3
+        # INIT_XYZS = np.array([[R*np.cos((i/6)*2*np.pi+np.pi/2), R*np.sin((i/6)*2*np.pi+np.pi/2)-R, H+i*H_STEP] for i in range(num_drones)])
+        INIT_XYZS = np.array([start])
+        INIT_RPYS = np.array([[0, 0,  0] for i in range(num_drones)])
 
-    print("RRT path found:", path)
+
+        env = CollapsedBuildingEnvironment(drone_model=DEFAULT_DRONES,
+                                    num_drones=DEFAULT_NUM_DRONES,
+                                    initial_xyzs=INIT_XYZS,
+                                    initial_rpys=INIT_RPYS,
+                                    physics=DEFAULT_PHYSICS,
+                                    neighbourhood_radius=10,
+                                    pyb_freq=DEFAULT_SIMULATION_FREQ_HZ,
+                                    ctrl_freq=DEFAULT_CONTROL_FREQ_HZ,
+                                    gui=DEFAULT_GUI,
+                                    record=False,
+                                    obstacles=False
+                                    )
+        
+        #### Obtain the PyBullet Client ID from the environment ####
+        PYB_CLIENT = env.getPyBulletClient()
+
+        #### Begin RRT(*) algorithm here ####
+
+        # Get obstacles from the environment
+        obstacles = env.get_obstacles()
+        obstacle_ids = []
+        # Plan path using RRT
+        rrt_star = RRT_STAR(start, goal, obstacles, obstacle_ids, bounds, step_size=0.4, max_iter=1000, debug=debug)
+        path, metrics = rrt_star.plan()
+        
+        if path is None or len(path) == 0:
+            print("RRT failed to find a path!")
+            trial_results.append({
+                "trial": trial,
+                "path_length": None,
+                "path_smoothness": None,
+                "num_iterations": metrics["num_iterations"],
+                "computation_time": metrics["computation_time"],
+                "avg_iteration_time": metrics["avg_iteration_time"],
+                "num_iterations": rrt_star.num_iterations
+            })
+            env.close()
+            continue
+
+        print(f"RRT path found in Trial {trial}:", path)
+        trial_results.append({
+            "trial": trial,
+            "path_length": metrics["path_length"],
+            "path_smoothness": metrics["path_smoothness"],
+            "num_iterations": metrics["num_iterations"],
+            "computation_time": metrics["computation_time"],
+            "avg_iteration_time": metrics["avg_iteration_time"]
+        })
+        reference_path = rrt_star.create_ref_from_path(path)
+        p.removeAllUserDebugItems()
+        if path is not None:
+            for j in range(len(path) - 1):
+                    p.addUserDebugLine(path[j], path[j + 1], [0, 0.6, 0], 2)
+
+        print("RRT path found:", path)
+        
     
-   
-    #### Initialize the logger #################################
-    # logger = Logger(logging_freq_hz=control_freq_hz,
-    #                 num_drones=num_drones,
-    #                 output_folder=output_folder,
-    #                 colab=colab
-    #                 )
-
-    #### Initialize the controllers ############################
-    # if drone in [DroneModel.CF2X, DroneModel.CF2P]:
-    ctrl = [DSLPIDControl(drone_model=drone) for i in range(num_drones)]
-
-    #### Run the simulation ####################################
-    action = np.zeros((num_drones,4))
-    START = time.time()
-    obs, reward, terminated, truncated, info = env.step(action)
-    k = 0
-    time_const = 0.1
-    # Follow the planned RRT path
-    for target in reference_path:
-        k = k + 1
-        if debug:
-            p.addUserDebugText("Target", target, textColorRGB=[0, 1, 0], textSize=1.2)
-
-        # Move towards each target waypoint
-        for step in range(0, int(time_const*env.CTRL_FREQ)):  # Adjust loop for smooth movement
-            for i in range(DEFAULT_NUM_DRONES):
-
-                # Compute control action for the drone
-                action[i, :], _, _ = ctrl[i].computeControlFromState(
-                    control_timestep=env.CTRL_TIMESTEP,
-                    state=obs[i],
-                    target_pos=target,
-                    target_rpy=np.zeros(3)  # Assuming level flight
-                )
-
-            # Step the simulation
-            obs, reward, terminated, truncated, info = env.step(action)
-            if debug:
-                env.render()
-            if terminated or truncated:
-                print("Simulation terminated early.")
-                break
-            
-            env.render()
-            sync(step + (k-1)*int(time_const*env.CTRL_FREQ), START, env.CTRL_TIMESTEP)
-        #### Log the simulation ####################################
-        # for j in range(num_drones):
-        #     logger.log( drone=j,
-        #                 timestamp=i / env.CTRL_FREQ,
-        #                 state=obs[j],
-        #                 control=np.hstack([target, np.zeros(9)])  # Logging the target position with padding for consistency
+        #### Initialize the logger #################################
+        # logger = Logger(logging_freq_hz=control_freq_hz,
+        #                 num_drones=num_drones,
+        #                 output_folder=output_folder,
+        #                 colab=colab
         #                 )
 
-        #### Printout ##############################################
-            #
+        #### Initialize the controllers ############################
+        # if drone in [DroneModel.CF2X, DroneModel.CF2P]:
+        ctrl = [DSLPIDControl(drone_model=drone) for i in range(num_drones)]
 
-        #### Sync the simulation ###################################
-        # if gui:
-        #     sync(i, START, env.CTRL_TIMESTEP)
+        #### Run the simulation ####################################
+        action = np.zeros((num_drones,4))
+        START = time.time()
+        obs, reward, terminated, truncated, info = env.step(action)
+        k = 0
+        time_const = 0.1
+        # Follow the planned RRT path
+        for target in reference_path:
+            k = k + 1
+            if debug:
+                p.addUserDebugText("Target", target, textColorRGB=[0, 1, 0], textSize=1.2)
 
-            
+            # Move towards each target waypoint
+            for step in range(0, int(time_const*env.CTRL_FREQ)):  # Adjust loop for smooth movement
+                for i in range(DEFAULT_NUM_DRONES):
 
-    #### Close the environment #################################
-    env.close()
+                    # Compute control action for the drone
+                    action[i, :], _, _ = ctrl[i].computeControlFromState(
+                        control_timestep=env.CTRL_TIMESTEP,
+                        state=obs[i],
+                        target_pos=target,
+                        target_rpy=np.zeros(3)  # Assuming level flight
+                    )
 
-    # #### Save the simulation results ###########################
-    # logger.save()
-    # logger.save_as_csv("rrt") # Optional CSV save
+                # Step the simulation
+                obs, reward, terminated, truncated, info = env.step(action)
+                if debug:
+                    env.render()
+                if terminated or truncated:
+                    print("Simulation terminated early.")
+                    break
+                
+                env.render()
+                sync(step + (k-1)*int(time_const*env.CTRL_FREQ), START, env.CTRL_TIMESTEP)
+            #### Log the simulation ####################################
+            # for j in range(num_drones):
+            #     logger.log( drone=j,
+            #                 timestamp=i / env.CTRL_FREQ,
+            #                 state=obs[j],
+            #                 control=np.hstack([target, np.zeros(9)])  # Logging the target position with padding for consistency
+            #                 )
 
-    # #### Plot the simulation results ###########################
-    # if plot:
-    #     logger.plot()
+            #### Printout ##############################################
+                #
+
+            #### Sync the simulation ###################################
+            # if gui:
+            #     sync(i, START, env.CTRL_TIMESTEP)
+
+                
+
+        #### Close the environment #################################
+        env.close()
+
+        # #### Save the simulation results ###########################
+        # logger.save()
+        # logger.save_as_csv("rrt") # Optional CSV save
+
+        # #### Plot the simulation results ###########################
+        # if plot:
+        #     logger.plot()
+    
+    # Log results
+    metrics_logger = Metrics()
+    metrics_logger.save_to_yaml(folder="./metrics/Building/RRT_STAR", trial_results=trial_results)
+
+    print("\nAll trials completed. Results saved to YAML.")
 
 if __name__ == "__main__":
     #### Define and parse (optional) arguments for the script ##
     parser = argparse.ArgumentParser(description='Helix flight script using CtrlAviary and DSLPIDControl')
+    parser.add_argument('--trials', default=NUM_TRIALS, type=int, help='Number of trials', metavar='')
     parser.add_argument('--drone',              default=DEFAULT_DRONES,     type=DroneModel,    help='Drone model (default: CF2X)', metavar='', choices=DroneModel)
     parser.add_argument('--num_drones',         default=DEFAULT_NUM_DRONES,          type=int,           help='Number of drones (default: 3)', metavar='')
     parser.add_argument('--physics',            default=DEFAULT_PHYSICS,      type=Physics,       help='Physics updates (default: PYB)', metavar='', choices=Physics)
